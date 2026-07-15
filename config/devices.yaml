@@ -1,0 +1,17 @@
+# Known static device bindings (optional).
+# Pre-populates enrollment so your own bands auto-assign on discovery.
+# Live enrollment (config/enrollment.yaml, written at runtime) is the general path
+# and is what scales to strangers at an event.
+#
+# device_id is the BLE peripheral address/UUID as reported by bleak (macOS reports
+# a CoreBluetooth UUID, not a MAC). Fill these in after your first `--source ble` run
+# — the Ops "unassigned devices" list shows each device_id.
+#
+# Example:
+# devices:
+#   - device_id: "AABBCCDD-1122-3344-5566-77889900AABB"
+#     person_id: "bashir"
+#     display_name: "Bashir"
+#     color: "#4f9dde"
+
+devices: []

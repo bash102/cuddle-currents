@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+
+# Runtime data
+captures/*.jsonl
+captures/*.json
+!captures/.gitkeep
+
+# Runtime enrollment store (written by the app; devices.yaml is the tracked template)
+config/enrollment.yaml
+
+# Editor / OS
+.DS_Store
+.vscode/
+.idea/
