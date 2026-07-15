@@ -6,6 +6,7 @@
 // bloom = group cohesion (Kuramoto order parameter). Roaming bands fade out/in.
 
 import { getFrame, isConnected } from "../store.js";
+import { drawGlyph, initials } from "../shapes.js";
 
 const canvas = document.getElementById("puddle");
 const ctx = canvas.getContext("2d");
@@ -21,8 +22,26 @@ function readTheme() {
     bloom: cssVar("--bloom-rgb") || "255,150,110",
     edge: cssVar("--edge-rgb") || "255,185,150",
     warn: cssVar("--warn") || "#e0a83c",
+    text: cssVar("--text") || "#f2e4de",
   };
 }
+
+// Hex color -> rgba string (for glow halos).
+function hexA(hex, a) {
+  const h = hex.replace("#", "");
+  const r = parseInt(h.slice(0, 2), 16);
+  const g = parseInt(h.slice(2, 4), 16);
+  const b = parseInt(h.slice(4, 6), 16);
+  return `rgba(${r},${g},${b},${a})`;
+}
+
+// Label toggle: press L to cycle none -> initials -> seat number. Off by default so
+// the Show view stays clean; people can still find their dot by color x shape.
+let labelMode = "none";
+const LABEL_CYCLE = { none: "initials", initials: "seat", seat: "none" };
+addEventListener("keydown", (e) => {
+  if (e.key === "l" || e.key === "L") labelMode = LABEL_CYCLE[labelMode];
+});
 
 // Local per-person animation state so pulsing is smooth between 10 Hz frames.
 const anim = new Map(); // person_id -> {phase, hr, alpha, x, y, color, name}
@@ -89,6 +108,8 @@ function frameTick(nowMs) {
     }
     a.color = p.color;
     a.name = p.display_name;
+    a.shape = p.shape || "disc";
+    a.seat = p.seat || 0;
     a.hr = p.hr ?? a.hr;
     // Advance local phase by heart rate; nudge toward the server phase.
     a.phase += (a.hr / 60) * 2 * Math.PI * dt;
@@ -135,26 +156,47 @@ function frameTick(nowMs) {
     }
   }
 
-  // Blobs.
+  // Blobs: a soft color halo + a crisp per-person glyph (color x shape identity).
   for (const a of pos.values()) {
     const beatPulse = 0.5 + 0.5 * Math.cos(a.phase % (2 * Math.PI)); // 1 at beat
-    const r = 14 + 16 * beatPulse;
+    const r = 13 + 11 * beatPulse;
+    // halo
     ctx.globalAlpha = a.alpha;
-    const bg = ctx.createRadialGradient(a.x, a.y, 0, a.x, a.y, r);
-    bg.addColorStop(0, a.color);
-    bg.addColorStop(1, "rgba(0,0,0,0)");
-    ctx.fillStyle = bg;
+    const halo = ctx.createRadialGradient(a.x, a.y, 0, a.x, a.y, r * 1.9);
+    halo.addColorStop(0, hexA(a.color, 0.45));
+    halo.addColorStop(1, hexA(a.color, 0));
+    ctx.fillStyle = halo;
     ctx.beginPath();
-    ctx.arc(a.x, a.y, r, 0, Math.PI * 2);
+    ctx.arc(a.x, a.y, r * 1.9, 0, Math.PI * 2);
     ctx.fill();
     ctx.globalAlpha = 1;
+    // crisp identity glyph
+    drawGlyph(ctx, a.shape, a.x, a.y, r, a.color, { glow: 6 + 8 * beatPulse, alpha: a.alpha });
+    // optional label
+    if (labelMode !== "none") {
+      ctx.globalAlpha = a.alpha;
+      ctx.fillStyle = TH.text;
+      ctx.font = "600 12px system-ui, sans-serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "top";
+      const text = labelMode === "seat" ? String(a.seat) : initials(a.name);
+      ctx.fillText(text, a.x, a.y + r + 5);
+      ctx.globalAlpha = 1;
+    }
   }
+  ctx.textAlign = "left";
+  ctx.textBaseline = "alphabetic";
 
-  // Connection banner.
+  // Subtle hint + connection banner.
+  ctx.fillStyle = hexA(TH.text, 0.28);
+  ctx.font = "12px system-ui, sans-serif";
+  const hint = labelMode === "none" ? "press L for labels"
+    : labelMode === "initials" ? "labels: initials (L)" : "labels: seat # (L)";
+  ctx.fillText(hint, 16, H - 16);
   if (!isConnected()) {
     ctx.fillStyle = TH.warn;
     ctx.font = "16px system-ui, sans-serif";
-    ctx.fillText("reconnecting…", 20, 30);
+    ctx.fillText("reconnecting…", 16, 28);
   }
 
   requestAnimationFrame(frameTick);

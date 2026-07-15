@@ -57,6 +57,11 @@ On the **Ops** page: enroll each device (identify it by its live HR), press
 **Show** page. Flip the **sync mode** and **scenario** selectors to see the effect.
 (For quick demos the simulator shortens the baseline via `--baseline-scale`.)
 
+Each person gets a unique visual identity — a **color × shape** glyph (8 colors ×
+8 shapes = 64 combos, covering the 30-person target) plus a **seat number** — so
+anyone can find their own dot ("you're #7, the teal triangle"). The glyph and seat
+show on every Ops card; on the Show view, press **L** to reveal initials or numbers.
+
 ### Simulator scenarios (`--scenario`, sim only, switchable live in Ops)
 
 | Scenario | What it shows |
@@ -87,8 +92,9 @@ The backend serves one WebSocket stream (`/ws`) to two decoupled pages, meant to
 in parallel on different monitors:
 
 - **`/` Show** — the final visualization: a clean, full-screen "puddle." Each person
-  is a blob on a phase ring; when people synchronize their blobs clump and pulse as
-  one, with a central bloom scaled by group cohesion.
+  is a glyph on a phase ring; when people synchronize their glyphs clump and pulse as
+  one, with a central bloom scaled by group cohesion. Press **L** to cycle on-dot
+  labels (none → initials → seat number).
 - **`/ops` Ops** — the technical status: per-band connection lifecycle, raw HR/RR
   trace + signal quality, the abstract per-person signal, and the synchrony heatmap.
 

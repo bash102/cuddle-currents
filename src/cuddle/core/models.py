@@ -88,6 +88,8 @@ class PersonProfile(BaseModel):
     person_id: str
     display_name: str
     color: str = "#888888"
+    shape: str = "disc"  # glyph shape; (color, shape) is a unique visual identity
+    seat: int = 0  # 1-based number assigned at enrollment, for "you're #7"
     device_id: str | None = None  # currently bound sensor (may change on swap)
     enrollment_state: EnrollmentState = EnrollmentState.discovered
     calibration: Calibration = Field(default_factory=Calibration)
@@ -102,6 +104,8 @@ class PersonState(BaseModel):
     person_id: str
     display_name: str
     color: str
+    shape: str = "disc"
+    seat: int = 0
     device_id: str | None = None
     connection: ConnectionState = ConnectionState.disconnected
     enrollment: EnrollmentState = EnrollmentState.discovered

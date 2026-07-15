@@ -4,6 +4,7 @@
 
 import { subscribe, isConnected } from "../store.js";
 import { post } from "../ws.js";
+import { drawGlyph } from "../shapes.js";
 
 // Theme colors resolved from theme.css (with fallbacks so there's no load race).
 function cssVar(n) {
@@ -105,7 +106,8 @@ function makePersonCard(p) {
   root.className = "card";
   root.innerHTML = `
     <div class="cardhead">
-      <span class="dot"></span>
+      <canvas class="glyph" width="22" height="22"></canvas>
+      <span class="seat"></span>
       <span class="name"></span>
       <span class="conn"></span>
       <span class="enroll"></span>
@@ -124,7 +126,8 @@ function makePersonCard(p) {
     post("/api/baseline/start", { person_id: p.person_id }));
   return {
     root,
-    dot: root.querySelector(".dot"),
+    glyph: root.querySelector(".glyph"),
+    seat: root.querySelector(".seat"),
     name: root.querySelector(".name"),
     conn: root.querySelector(".conn"),
     enroll: root.querySelector(".enroll"),
@@ -143,7 +146,11 @@ function makePersonCard(p) {
 
 function updatePersonCard(n, p) {
   const c = connColor(p.connection);
-  n.dot.style.background = c;
+  // identity glyph (color x shape) + seat number
+  const g = n.glyph.getContext("2d");
+  g.clearRect(0, 0, n.glyph.width, n.glyph.height);
+  drawGlyph(g, p.shape || "disc", 11, 11, 7, p.color);
+  n.seat.textContent = p.seat ? `#${p.seat}` : "";
   n.name.textContent = p.display_name;
   n.conn.textContent = p.connection;
   n.conn.style.color = c;

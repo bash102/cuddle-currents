@@ -29,8 +29,7 @@ from cuddle.processing.baseline import BaselineCollector
 # people get maximally distinct colors. Validated with the dataviz skill's palette
 # checker against the dark wine surface: lightness band, chroma, normal-vision
 # separation, and surface contrast all PASS; CVD separation is a WARN in the legal
-# 6-8 floor band, which the Ops view's per-person name labels satisfy as the required
-# secondary identity channel. Assignment order == this order.
+# 6-8 floor band, which the shape channel + name labels satisfy as secondary encoding.
 _DEFAULT_COLORS = [
     "#3b6fe0",  # sapphire
     "#e8663f",  # coral
@@ -41,6 +40,20 @@ _DEFAULT_COLORS = [
     "#1f9e6f",  # emerald
     "#c14fa0",  # orchid
 ]
+
+# Shape channel — the second visual dimension so identity scales past the palette.
+# 8 colors x 8 shapes = 64 unique (color, shape) combos, well over the 30-person cap.
+# Color cycles fastest (differs for consecutive seats); shape advances once the
+# palette wraps, so seats 1 and 9 share a color but differ in shape.
+_SHAPES = ["disc", "ring", "triangle", "square", "diamond", "star", "hexagon", "plus"]
+
+
+def identity_for_seat(seat: int) -> tuple[str, str]:
+    """Map a 1-based seat number to a unique (color, shape) up to 64 people."""
+    i = max(0, seat - 1)
+    color = _DEFAULT_COLORS[i % len(_DEFAULT_COLORS)]
+    shape = _SHAPES[(i // len(_DEFAULT_COLORS)) % len(_SHAPES)]
+    return color, shape
 
 
 def _slug(name: str) -> str:
@@ -63,20 +76,22 @@ class EnrollmentManager:
         self._path = Path(store_path)
         self._baselines: dict[str, BaselineCollector] = {}
         self._baseline_status: dict[str, str] = {}  # person_id -> last reason
-        self._color_i = 0
+        self._next_seat = 1  # monotonic; never reused within a session
 
     # ---- enrollment actions ---------------------------------------------
 
     def assign(self, device_id: str, display_name: str, color: str | None = None) -> PersonProfile:
         """Bind a discovered device to a new (or renamed) person."""
         person_id = self._unique_person_id(display_name)
-        if color is None:
-            color = _DEFAULT_COLORS[self._color_i % len(_DEFAULT_COLORS)]
-            self._color_i += 1
+        seat = self._next_seat
+        self._next_seat += 1
+        seat_color, shape = identity_for_seat(seat)
         profile = PersonProfile(
             person_id=person_id,
             display_name=display_name,
-            color=color,
+            color=color or seat_color,
+            shape=shape,
+            seat=seat,
             device_id=device_id,
             enrollment_state=EnrollmentState.assigned,
         )
@@ -161,12 +176,22 @@ class EnrollmentManager:
         if not self._path.exists():
             return
         data = yaml.safe_load(self._path.read_text()) or {}
+        max_seat = 0
         for row in data.get("people", []):
             cal = Calibration(**row.get("calibration", {})) if row.get("calibration") else Calibration()
+            seat = int(row.get("seat", 0))
+            color = row.get("color")
+            shape = row.get("shape")
+            if seat and (not color or not shape):
+                sc, ss = identity_for_seat(seat)
+                color = color or sc
+                shape = shape or ss
             profile = PersonProfile(
                 person_id=row["person_id"],
                 display_name=row["display_name"],
-                color=row.get("color", "#888888"),
+                color=color or "#888888",
+                shape=shape or "disc",
+                seat=seat,
                 device_id=row.get("device_id"),
                 enrollment_state=EnrollmentState(row.get("enrollment_state", "assigned")),
                 calibration=cal,
@@ -174,6 +199,9 @@ class EnrollmentManager:
             self._store.create_person(profile)
             if profile.device_id:
                 self._store.bind_device(profile.device_id, profile.person_id)
+            max_seat = max(max_seat, seat)
+        # Continue seat numbering after the highest restored seat (no reuse).
+        self._next_seat = max(self._next_seat, max_seat + 1)
 
     def rebind_source(self) -> None:
         """Push all known device bindings into the source (call after load)."""
@@ -192,6 +220,8 @@ class EnrollmentManager:
                     "person_id": p.person_id,
                     "display_name": p.display_name,
                     "color": p.color,
+                    "shape": p.shape,
+                    "seat": p.seat,
                     "device_id": p.device_id,
                     "enrollment_state": p.enrollment_state.value,
                     "calibration": p.calibration.model_dump(exclude_none=True),

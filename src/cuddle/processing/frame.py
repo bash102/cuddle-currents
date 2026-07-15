@@ -59,6 +59,8 @@ def build_frame(
                 person_id=p.person_id,
                 display_name=p.display_name,
                 color=p.color,
+                shape=p.shape,
+                seat=p.seat,
                 device_id=p.device_id,
                 connection=connection,
                 enrollment=p.enrollment_state,
