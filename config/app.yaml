@@ -25,7 +25,7 @@ baseline:
 
 transport:
   host: 127.0.0.1
-  port: 8000
+  port: 8770                  # uncommon default to avoid collisions; override with --port
   frame_hz: 10.0              # StateFrame broadcast rate
 
 reconnect:

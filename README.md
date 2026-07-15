@@ -42,9 +42,15 @@ pip install -e .              # or: pip install -e '.[dev]' for tests
 cuddle --source sim --scenario drift_into_sync --people 6
 
 # Then open, in two separate windows:
-#   Show view (clean puddle):   http://127.0.0.1:8000/
-#   Ops view  (technical):      http://127.0.0.1:8000/ops
+#   Show view (clean puddle):   http://127.0.0.1:8770/
+#   Ops view  (technical):      http://127.0.0.1:8770/ops
 ```
+
+The server binds `127.0.0.1:8770` by default (an uncommon port, to avoid colliding
+with other local services). Override the port and host per-run with
+`cuddle --port 9001 --host 0.0.0.0`, or persistently in `config/app.yaml`
+(`transport.port` / `transport.host`). The frontends discover the port automatically,
+so no other change is needed.
 
 On the **Ops** page: enroll each device (identify it by its live HR), press
 **Baseline**, and once calibrated the person goes active and joins the puddle on the

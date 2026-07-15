@@ -36,7 +36,7 @@ _DEFAULTS: dict[str, Any] = {
     },
     "transport": {
         "host": "127.0.0.1",
-        "port": 8000,
+        "port": 8770,
         "frame_hz": 10.0,
     },
     "reconnect": {
