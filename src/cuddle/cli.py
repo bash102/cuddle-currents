@@ -65,7 +65,8 @@ def main() -> None:
     ap = argparse.ArgumentParser(prog="cuddle", description="Cuddle Currents POC")
     ap.add_argument("--source", choices=["sim", "ble", "replay"], default="sim")
     ap.add_argument("--scenario", default="drift_into_sync",
-                    help="sim scenario: independent | drift_into_sync | dropout")
+                    help="sim scenario: independent | drift_into_sync | dropout | "
+                         "cliques | sync_then_break | contagion | pacer")
     ap.add_argument("--people", type=int, default=6, help="number of simulated people")
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--baseline-scale", type=float, default=0.1,

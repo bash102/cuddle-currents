@@ -33,6 +33,43 @@ def test_dropout_scenario_schedules_a_dropout():
     assert len(s.dropouts()) == 1
 
 
+def test_cliques_has_subgroups_with_weak_cross_coupling():
+    s = make_scenario("cliques")
+    assert s.n_groups == 2
+    assert s.cross_factor < 1.0
+    # within-group weight is full, cross-group is scaled down
+    assert s.pair_weight(0, 0) == 1.0
+    assert s.pair_weight(0, 1) == pytest.approx(s.cross_factor)
+    # people are split across groups
+    assert s.group_of(0) != s.group_of(1)
+
+
+def test_sync_then_break_ramps_up_then_back_to_zero():
+    s = make_scenario("sync_then_break")
+    assert s.coupling(s.ramp_start - 1) == 0.0
+    assert s.coupling(s.ramp_end + 1) == pytest.approx(s.k_max)  # locked/held
+    assert s.coupling(s.ramp_down_end + 5) == 0.0  # released
+    mid_release = s.coupling((s.ramp_down_start + s.ramp_down_end) / 2)
+    assert 0 < mid_release < s.k_max  # partway through the release
+
+
+def test_contagion_activates_members_progressively():
+    s = make_scenario("contagion")
+    assert s.active_at(0, 0.0)  # seed always active
+    # a later member is inactive early, active after its scheduled time
+    t_join = s.spread_start + 3 * s.spread_interval
+    assert not s.active_at(3, t_join - 1)
+    assert s.active_at(3, t_join + 1)
+
+
+def test_pacer_sets_external_rhythm():
+    s = make_scenario("pacer")
+    assert s.pacer is True
+    assert s.pacer_k > 0
+    assert s.pacer_strength(s.ramp_start - 1) == 0.0  # engages after ramp_start
+    assert s.pacer_strength(s.ramp_start + 1) == pytest.approx(s.pacer_k)
+
+
 def test_unknown_scenario_raises():
     with pytest.raises(ValueError):
         make_scenario("nope")

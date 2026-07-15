@@ -57,6 +57,18 @@ On the **Ops** page: enroll each device (identify it by its live HR), press
 **Show** page. Flip the **sync mode** and **scenario** selectors to see the effect.
 (For quick demos the simulator shortens the baseline via `--baseline-scale`.)
 
+### Simulator scenarios (`--scenario`, sim only, switchable live in Ops)
+
+| Scenario | What it shows |
+|---|---|
+| `independent` | Uncoupled hearts — synchrony stays near zero (baseline/control). |
+| `drift_into_sync` | Coupling ramps up; the group gradually locks into one pulsing puddle. |
+| `dropout` | A band roams out and rejoins — exercises the connection lifecycle. |
+| `cliques` | Two sub-groups lock internally at different rates — the puddle forms separate clumps. |
+| `sync_then_break` | The group locks together, holds, then coupling releases and they drift apart. |
+| `contagion` | Sync spreads from a seed outward — members join the locked group one at a time. |
+| `pacer` | An external rhythm (guided co-breathing) everyone couples toward, pulling mixed rates to a common ~63 bpm. |
+
 With real bands:
 
 ```bash

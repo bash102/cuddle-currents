@@ -66,6 +66,10 @@ def create_app(engine) -> FastAPI:
     async def ops() -> FileResponse:
         return FileResponse(FRONTEND / "ops.html")
 
+    @app.get("/theme.css")
+    async def theme() -> FileResponse:
+        return FileResponse(FRONTEND / "theme.css", media_type="text/css")
+
     @app.get("/favicon.ico")
     async def favicon() -> Response:
         return Response(status_code=204)

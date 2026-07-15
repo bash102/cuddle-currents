@@ -4,62 +4,63 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Cuddle Currents — Ops</title>
+    <link rel="stylesheet" href="/theme.css" />
     <style>
       :root { color-scheme: dark; }
       * { box-sizing: border-box; }
       body {
-        margin: 0; background: #0a0e1a; color: #d8deea;
+        margin: 0; background: var(--bg); color: var(--text);
         font: 14px/1.4 system-ui, -apple-system, sans-serif;
       }
       header {
         display: flex; align-items: center; gap: 18px; flex-wrap: wrap;
-        padding: 10px 16px; background: #111726; border-bottom: 1px solid #1e2740;
+        padding: 10px 16px; background: var(--bg-2); border-bottom: 1px solid var(--border);
         position: sticky; top: 0; z-index: 5;
       }
       header h1 { font-size: 15px; margin: 0; font-weight: 600; letter-spacing: .3px; }
-      header .kv { color: #8a93a8; }
-      header .kv b { color: #d8deea; font-weight: 600; }
+      header .kv { color: var(--muted); }
+      header .kv b { color: var(--text); font-weight: 600; }
       select {
-        background: #1a2135; color: #d8deea; border: 1px solid #2a3350;
+        background: var(--panel-2); color: var(--text); border: 1px solid var(--border);
         border-radius: 6px; padding: 3px 6px;
       }
       .layout { display: grid; grid-template-columns: 260px 1fr 300px; gap: 14px; padding: 14px; }
-      .col h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: #7f8aa3; margin: 0 0 8px; }
+      .col h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 0 0 8px; }
       .device, .card {
-        background: #121a2c; border: 1px solid #1e2740; border-radius: 10px;
+        background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
         padding: 10px 12px; margin-bottom: 10px;
       }
       .devhead { display: flex; justify-content: space-between; font-size: 12px; }
-      .devid { color: #9aa4bd; word-break: break-all; }
-      .devhr { color: #6fb0ff; font-variant-numeric: tabular-nums; }
+      .devid { color: var(--muted); word-break: break-all; }
+      .devhr { color: var(--accent); font-variant-numeric: tabular-nums; }
       .enrollrow { display: flex; gap: 6px; margin-top: 8px; }
-      .nameinput { flex: 1; min-width: 0; background: #0e1524; border: 1px solid #2a3350; color: #d8deea; border-radius: 6px; padding: 4px 8px; }
-      button { background: #244; color: #cfe; border: 1px solid #366; border-radius: 6px; padding: 4px 10px; cursor: pointer; }
-      button:hover { background: #2c5757; }
+      .nameinput { flex: 1; min-width: 0; background: var(--field); border: 1px solid var(--border); color: var(--text); border-radius: 6px; padding: 4px 8px; }
+      button { background: var(--panel-2); color: var(--accent); border: 1px solid var(--accent); border-radius: 6px; padding: 4px 10px; cursor: pointer; }
+      button:hover { background: var(--accent); color: #2a0f12; }
       .cardhead { display: flex; align-items: center; gap: 8px; }
       .dot { width: 10px; height: 10px; border-radius: 50%; flex: none; }
       .name { font-weight: 600; }
       .conn { font-size: 12px; }
-      .enroll { font-size: 11px; color: #7f8aa3; }
+      .enroll { font-size: 11px; color: var(--muted); }
       .grow { flex: 1; }
       .metrics { display: flex; gap: 18px; margin: 8px 0 6px; }
-      .metric label { display: block; font-size: 10px; color: #7f8aa3; text-transform: uppercase; }
+      .metric label { display: block; font-size: 10px; color: var(--muted); text-transform: uppercase; }
       .metric span { font-size: 18px; font-variant-numeric: tabular-nums; }
       .qualwrap { display: flex; align-items: center; gap: 8px; }
-      .qualbar { flex: 1; height: 6px; background: #0e1524; border-radius: 3px; overflow: hidden; }
+      .qualbar { flex: 1; height: 6px; background: var(--field); border-radius: 3px; overflow: hidden; }
       .qualfill { height: 100%; width: 0; transition: width .2s; }
-      .qflags { font-size: 10px; color: #e0954f; min-height: 12px; }
+      .qflags { font-size: 10px; color: var(--warn); min-height: 12px; }
       .tracewrap { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
-      .trace { flex: 1; background: #0e1524; border-radius: 6px; }
-      .dial { background: #0e1524; border-radius: 6px; flex: none; }
-      .baseprog { display: none; height: 4px; background: #0e1524; border-radius: 2px; margin-top: 8px; overflow: hidden; }
-      .basefill { height: 100%; width: 0; background: #c65fd0; transition: width .2s; }
+      .trace { flex: 1; background: var(--field); border-radius: 6px; }
+      .dial { background: var(--field); border-radius: 6px; flex: none; }
+      .baseprog { display: none; height: 4px; background: var(--field); border-radius: 2px; margin-top: 8px; overflow: hidden; }
+      .basefill { height: 100%; width: 0; background: var(--accent-2); transition: width .2s; }
       .synchead { display: flex; gap: 16px; margin-bottom: 10px; font-variant-numeric: tabular-nums; }
       .synchead .big { font-size: 22px; font-weight: 600; }
-      .synchead label { display: block; font-size: 10px; color: #7f8aa3; text-transform: uppercase; }
-      #heatmap { width: 100%; height: 280px; background: #0e1524; border-radius: 10px; }
-      .empty { color: #5b647c; font-size: 13px; }
-      .hint { color: #5b647c; font-size: 11px; margin-top: 6px; }
+      .synchead label { display: block; font-size: 10px; color: var(--muted); text-transform: uppercase; }
+      #heatmap { width: 100%; height: 280px; background: var(--field); border-radius: 10px; }
+      .empty { color: var(--faint); font-size: 13px; }
+      .hint { color: var(--faint); font-size: 11px; margin-top: 6px; }
     </style>
   </head>
   <body>
@@ -80,6 +81,10 @@
           <option value="drift_into_sync">drift_into_sync</option>
           <option value="independent">independent</option>
           <option value="dropout">dropout</option>
+          <option value="cliques">cliques</option>
+          <option value="sync_then_break">sync_then_break</option>
+          <option value="contagion">contagion</option>
+          <option value="pacer">pacer</option>
         </select>
       </span>
     </header>

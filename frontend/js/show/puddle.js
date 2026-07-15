@@ -10,6 +10,20 @@ import { getFrame, isConnected } from "../store.js";
 const canvas = document.getElementById("puddle");
 const ctx = canvas.getContext("2d");
 
+// Theme colors come from theme.css (single source of truth), resolved for canvas.
+function cssVar(name) {
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+}
+let TH = readTheme();
+function readTheme() {
+  return {
+    bg: cssVar("--show-bg") || "#150a10",
+    bloom: cssVar("--bloom-rgb") || "255,150,110",
+    edge: cssVar("--edge-rgb") || "255,185,150",
+    warn: cssVar("--warn") || "#e0a83c",
+  };
+}
+
 // Local per-person animation state so pulsing is smooth between 10 Hz frames.
 const anim = new Map(); // person_id -> {phase, hr, alpha, x, y, color, name}
 
@@ -19,7 +33,7 @@ function resize() {
   canvas.height = innerHeight * dpr;
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 }
-addEventListener("resize", resize);
+addEventListener("resize", () => { resize(); TH = readTheme(); });
 resize();
 
 let last = performance.now();
@@ -45,7 +59,7 @@ function frameTick(nowMs) {
   const ring = Math.min(W, H) * 0.30;
 
   // Backdrop.
-  ctx.fillStyle = "#0a0e1a";
+  ctx.fillStyle = TH.bg;
   ctx.fillRect(0, 0, W, H);
 
   const people = (frame?.people || []).filter((p) => p.enrollment === "active");
@@ -57,8 +71,8 @@ function frameTick(nowMs) {
   // Central bloom scales with group cohesion / order parameter.
   const bloom = Math.max(order, (cohesion + 1) / 2);
   const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, ring * (0.6 + bloom));
-  g.addColorStop(0, `rgba(120,180,255,${0.05 + 0.30 * bloom})`);
-  g.addColorStop(1, "rgba(120,180,255,0)");
+  g.addColorStop(0, `rgba(${TH.bloom},${0.05 + 0.30 * bloom})`);
+  g.addColorStop(1, `rgba(${TH.bloom},0)`);
   ctx.fillStyle = g;
   ctx.beginPath();
   ctx.arc(cx, cy, ring * (0.6 + bloom), 0, Math.PI * 2);
@@ -112,7 +126,7 @@ function frameTick(nowMs) {
       if (s <= 0.05) continue;
       const ai = pos.get(ids[i]), aj = pos.get(ids[j]);
       if (!ai || !aj) continue;
-      ctx.strokeStyle = `rgba(150,200,255,${0.5 * s * Math.min(ai.alpha, aj.alpha)})`;
+      ctx.strokeStyle = `rgba(${TH.edge},${0.5 * s * Math.min(ai.alpha, aj.alpha)})`;
       ctx.lineWidth = 1 + 3 * s;
       ctx.beginPath();
       ctx.moveTo(ai.x, ai.y);
@@ -138,7 +152,7 @@ function frameTick(nowMs) {
 
   // Connection banner.
   if (!isConnected()) {
-    ctx.fillStyle = "rgba(255,120,120,0.9)";
+    ctx.fillStyle = TH.warn;
     ctx.font = "16px system-ui, sans-serif";
     ctx.fillText("reconnecting…", 20, 30);
   }

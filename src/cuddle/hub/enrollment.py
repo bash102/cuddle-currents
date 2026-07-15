@@ -25,9 +25,21 @@ from cuddle.core.models import (
 from cuddle.hub.registry import SessionStore
 from cuddle.processing.baseline import BaselineCollector
 
+# Jewel-tone categorical palette, warm/cool alternating so consecutively-enrolled
+# people get maximally distinct colors. Validated with the dataviz skill's palette
+# checker against the dark wine surface: lightness band, chroma, normal-vision
+# separation, and surface contrast all PASS; CVD separation is a WARN in the legal
+# 6-8 floor band, which the Ops view's per-person name labels satisfy as the required
+# secondary identity channel. Assignment order == this order.
 _DEFAULT_COLORS = [
-    "#4f9dde", "#e0724f", "#5fbf7f", "#c65fd0", "#d9b13c",
-    "#4fd0c4", "#e05f8a", "#8a7fe0", "#7fae4f", "#e0954f",
+    "#3b6fe0",  # sapphire
+    "#e8663f",  # coral
+    "#17a2a2",  # teal
+    "#e0245e",  # ruby
+    "#b07914",  # gold
+    "#9b5de5",  # amethyst
+    "#1f9e6f",  # emerald
+    "#c14fa0",  # orchid
 ]
 
 

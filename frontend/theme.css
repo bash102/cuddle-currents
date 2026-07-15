@@ -1,0 +1,43 @@
+/* Cuddle Currents theme — warm "heart" base + jewel accents.
+ * Single source of truth for chrome colors, shared by both pages and read by the
+ * canvas code via getComputedStyle. Person/blob colors are data-driven (assigned by
+ * the backend jewel palette) and are NOT defined here. */
+
+:root {
+  color-scheme: dark;
+
+  /* Warm wine surfaces */
+  --bg: #1a0d12;          /* app background (warm wine-black) */
+  --bg-2: #22111a;
+  --panel: #26121b;
+  --panel-2: #2e1622;
+  --field: #170a10;       /* inputs / recessed wells */
+  --border: #3d2230;
+
+  /* Ink */
+  --text: #f2e4de;
+  --muted: #b99aa0;
+  --faint: #7c5c63;
+
+  /* Accents */
+  --accent: #ff8a6b;      /* rose-gold — links, focus, headline glow */
+  --accent-2: #9b5de5;    /* amethyst — secondary accent */
+  --trace: #ffb27a;       /* warm HR trace line */
+
+  /* Semantic connection / quality states */
+  --good: #3fae7a;        /* connected / high quality */
+  --warn: #e0a83c;        /* stale / marginal quality */
+  --recon: #e8663f;       /* reconnecting */
+  --bad: #c0506a;         /* disconnected / low quality */
+  --scan: #9b5de5;        /* scanning / connecting */
+
+  /* Diverging heatmap: sapphire (anti-phase) — neutral — rose-gold (in-phase) */
+  --heat-neg: #3b6fe0;
+  --heat-mid: #241019;    /* neutral midpoint (near-surface) */
+  --heat-pos: #ff8a6b;
+
+  /* Canvas glows (rgb triplets for rgba() composition) */
+  --bloom-rgb: 255, 150, 110;   /* rose-gold puddle bloom */
+  --edge-rgb: 255, 185, 150;    /* synchrony edges */
+  --show-bg: #150a10;           /* Show-view backdrop (slightly deeper) */
+}

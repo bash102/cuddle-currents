@@ -72,6 +72,7 @@ class SimulatorSource:
         self._task: asyncio.Task | None = None
         self._running = False
         self._t0: float | None = None
+        self._pacer_phase: float = 0.0
 
     # ---- construction ----------------------------------------------------
 
@@ -98,6 +99,7 @@ class SimulatorSource:
     async def start(self) -> None:
         self._running = True
         self._t0 = clock.now()
+        self._pacer_phase = 0.0
         self._schedule_dropouts()
         self._task = asyncio.create_task(self._run(), name="sim-run")
 
@@ -144,6 +146,7 @@ class SimulatorSource:
                 delattr(o, "_drop_window")
             self._states[o.device_id] = ConnectionState.connected
         self._t0 = clock.now()
+        self._pacer_phase = 0.0
         self._schedule_dropouts()
 
     @property
@@ -171,12 +174,21 @@ class SimulatorSource:
             dt = now - prev
             prev = now
             elapsed = now - self._t0
-            k = self._scenario.coupling(elapsed)
-            self._integrate(dt, elapsed, now, k)
+            self._integrate(dt, elapsed, now)
 
-    def _integrate(self, dt: float, elapsed: float, now: float, k: float) -> None:
+    def _integrate(self, dt: float, elapsed: float, now: float) -> None:
         n = self._n
+        sc = self._scenario
+        k = sc.coupling(elapsed)
+        pacer_k = sc.pacer_strength(elapsed)
+
+        # Advance the external pacer (guided breathing) rhythm.
+        if sc.pacer:
+            self._pacer_phase = (self._pacer_phase + TWO_PI * sc.pacer_hz * dt) % TWO_PI
+
         phases = [o.phase for o in self._oscillators]
+        groups = [sc.group_of(i) for i in range(n)]
+        active = [sc.active_at(i, elapsed) for i in range(n)]
 
         for i, o in enumerate(self._oscillators):
             # Dropout handling: a roaming band emits nothing while out of range.
@@ -194,18 +206,25 @@ class SimulatorSource:
                     self._states[o.device_id] = ConnectionState.connected
 
             # Slow HR drift + respiratory sinus arrhythmia modulate instantaneous rate.
+            # A per-group rate bias (cliques) keeps distinct sub-groups at distinct rates.
             o._drift_phase += TWO_PI * 0.02 * dt
             hr = o.base_hr + o.hr_jitter * math.sin(o._drift_phase)
+            hr += groups[i] * sc.group_hr_spread
             rsa = 1.0 + o.resp_amp * math.sin(TWO_PI * o.resp_hz * now + o.rsa_phase)
             omega = TWO_PI * (hr / 60.0) * rsa
 
             coupling = 0.0
-            if k > 0.0 and n > 1:
+            # Mutual (person-to-person) coupling, weighted by clique structure and
+            # gated by contagion activation.
+            if k > 0.0 and n > 1 and active[i]:
                 s = 0.0
                 for j in range(n):
-                    if j != i:
-                        s += math.sin(phases[j] - o.phase)
-                coupling = (k / n) * s
+                    if j != i and active[j]:
+                        s += sc.pair_weight(groups[i], groups[j]) * math.sin(phases[j] - o.phase)
+                coupling += (k / n) * s
+            # External pacer coupling.
+            if pacer_k > 0.0:
+                coupling += pacer_k * math.sin(self._pacer_phase - o.phase)
 
             o.phase += (omega + coupling) * dt
 

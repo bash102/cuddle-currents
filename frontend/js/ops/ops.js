@@ -5,10 +5,34 @@
 import { subscribe, isConnected } from "../store.js";
 import { post } from "../ws.js";
 
-const CONN_COLOR = {
-  connected: "#5fbf7f", stale: "#d9b13c", reconnecting: "#e0954f",
-  disconnected: "#8a8f9a", connecting: "#4f9dde", scanning: "#4f9dde",
-};
+// Theme colors resolved from theme.css (with fallbacks so there's no load race).
+function cssVar(n) {
+  return getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+}
+let _theme = null;
+function theme() {
+  if (_theme && _theme.good) return _theme;
+  _theme = {
+    good: cssVar("--good") || "#3fae7a",
+    warn: cssVar("--warn") || "#e0a83c",
+    recon: cssVar("--recon") || "#e8663f",
+    bad: cssVar("--bad") || "#c0506a",
+    scan: cssVar("--scan") || "#9b5de5",
+    trace: cssVar("--trace") || "#ffb27a",
+    border: cssVar("--border") || "#3d2230",
+    heatNeg: cssVar("--heat-neg") || "#3b6fe0",
+    heatMid: cssVar("--heat-mid") || "#241019",
+    heatPos: cssVar("--heat-pos") || "#ff8a6b",
+  };
+  return _theme;
+}
+function connColor(state) {
+  const t = theme();
+  return {
+    connected: t.good, stale: t.warn, reconnecting: t.recon,
+    disconnected: t.bad, connecting: t.scan, scanning: t.scan,
+  }[state] || t.bad;
+}
 const ENROLL_LABEL = {
   discovered: "discovered", assigned: "assigned", baselining: "baselining…",
   calibrated: "calibrated", active: "active", retired: "retired",
@@ -118,7 +142,7 @@ function makePersonCard(p) {
 }
 
 function updatePersonCard(n, p) {
-  const c = CONN_COLOR[p.connection] || "#888";
+  const c = connColor(p.connection);
   n.dot.style.background = c;
   n.name.textContent = p.display_name;
   n.conn.textContent = p.connection;
@@ -129,8 +153,9 @@ function updatePersonCard(n, p) {
   n.hrvd.textContent = p.rmssd_delta != null ? `${p.rmssd_delta >= 0 ? "+" : ""}${p.rmssd_delta.toFixed(0)}%` : "—";
 
   const q = p.quality ?? 0;
+  const t = theme();
   n.qualfill.style.width = `${q * 100}%`;
-  n.qualfill.style.background = q > 0.7 ? "#5fbf7f" : q > 0.4 ? "#d9b13c" : "#e0724f";
+  n.qualfill.style.background = q > 0.7 ? t.good : q > 0.4 ? t.warn : t.bad;
   n.qflags.textContent = (p.quality_flags || []).join(" ");
 
   n.baselinebtn.style.display = (p.enrollment === "baselining") ? "none" : "";
@@ -149,7 +174,7 @@ function drawTrace(cv, data) {
   const vals = data.filter((v) => v != null);
   const min = Math.min(...vals), max = Math.max(...vals);
   const span = Math.max(1, max - min);
-  ctx.strokeStyle = "#6fb0ff";
+  ctx.strokeStyle = theme().trace;
   ctx.lineWidth = 1.5;
   ctx.beginPath();
   data.forEach((v, i) => {
@@ -164,11 +189,11 @@ function drawDial(cv, phase, color) {
   const ctx = cv.getContext("2d");
   const cx = cv.width / 2, cy = cv.height / 2, r = 18;
   ctx.clearRect(0, 0, cv.width, cv.height);
-  ctx.strokeStyle = "#2a3145";
+  ctx.strokeStyle = theme().border;
   ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.stroke();
   if (phase == null) return;
   const x = cx + r * Math.cos(phase), y = cy + r * Math.sin(phase);
-  ctx.fillStyle = color || "#6fb0ff";
+  ctx.fillStyle = color || theme().trace;
   ctx.beginPath(); ctx.arc(x, y, 4, 0, Math.PI * 2); ctx.fill();
 }
 
@@ -196,14 +221,20 @@ function drawHeatmap(sync) {
   }
 }
 
+function hexToRgb(h) {
+  h = h.replace("#", "");
+  return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16)];
+}
+function lerp(a, b, t) {
+  return a.map((x, i) => Math.round(x + (b[i] - x) * t));
+}
 function heatColor(v) {
-  // diverging: blue (anti) -> dark -> warm (in-phase)
-  if (v >= 0) {
-    const t = Math.min(1, v);
-    return `rgb(${Math.round(40 + 215 * t)}, ${Math.round(40 + 120 * t)}, ${Math.round(60 * (1 - t))})`;
-  }
-  const t = Math.min(1, -v);
-  return `rgb(${Math.round(40 * (1 - t))}, ${Math.round(60 + 80 * t)}, ${Math.round(60 + 195 * t)})`;
+  // Diverging ramp with a neutral midpoint: sapphire (anti-phase) — mid — rose-gold.
+  const th = theme();
+  const mid = hexToRgb(th.heatMid);
+  const end = hexToRgb(v >= 0 ? th.heatPos : th.heatNeg);
+  const c = lerp(mid, end, Math.min(1, Math.abs(v)));
+  return `rgb(${c[0]}, ${c[1]}, ${c[2]})`;
 }
 
 // ---- wire up ----------------------------------------------------------------
