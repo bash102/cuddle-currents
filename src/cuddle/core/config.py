@@ -17,7 +17,7 @@ _DEFAULTS: dict[str, Any] = {
         "hr_smooth_tau": 3.0,
         "rmssd_window": 45.0,
         "sync_window": 30.0,
-        "sync_max_lag": 5.0,
+        "sync_max_lag": 2.0,
         "sync_mode": "zscore",
         "stale_after_rr_factor": 2.5,
         "sync_grace": 10.0,

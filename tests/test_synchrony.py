@@ -3,7 +3,7 @@
 import numpy as np
 
 from cuddle.core.models import Calibration
-from cuddle.processing.synchrony import _kuramoto_order, _transform, ccc
+from cuddle.processing.synchrony import _kuramoto_order, _transform, best_lag_ccc, ccc
 
 
 def test_ccc_identical_series():
@@ -69,6 +69,28 @@ def test_zscore_not_worse_than_raw_for_similar_dynamics():
     zc = ccc(_transform(x, "zscore", None), _transform(y, "zscore", None))
     assert zc > 0.99
     assert zc > raw
+
+
+def test_best_lag_recovers_shifted_signal():
+    # Same signal, one delayed by 6 samples -> lag-0 CCC is deflated, lag scan recovers.
+    t = np.linspace(0, 12 * np.pi, 400)
+    x = np.sin(t) + 0.4 * np.sin(2.7 * t)
+    shift = 6
+    y = np.roll(x, shift)
+    zero_lag = ccc(x[shift:], y[shift:])  # a naive aligned slice still mixes the shift
+    best, lag = best_lag_ccc(x, y, max_lag=10)
+    assert best > 0.99
+    assert lag == shift or lag == -shift
+    assert best > ccc(x, y)  # improves over the unshifted comparison
+
+
+def test_best_lag_small_window_does_not_inflate_independent():
+    # Independent noise with a small lag budget should stay low (no spurious ~1).
+    rng = np.random.default_rng(7)
+    x = rng.normal(size=300)
+    y = rng.normal(size=300)
+    best, _ = best_lag_ccc(x, y, max_lag=8)
+    assert abs(best) < 0.3
 
 
 def test_kuramoto_order_locked_vs_scattered():

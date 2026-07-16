@@ -34,6 +34,35 @@ from cuddle.processing.abstract import phase_grid, smoothed_hr_grid
 from cuddle.processing.resample import uniform_grid
 
 
+def _lag_pair(xi: np.ndarray, xj: np.ndarray, lag: int) -> tuple[np.ndarray, np.ndarray]:
+    """Align xi against xj shifted by ``lag`` samples (xj delayed for lag > 0)."""
+    if lag > 0:
+        return xi[lag:], xj[: xj.size - lag]
+    if lag < 0:
+        return xi[: xi.size + lag], xj[-lag:]
+    return xi, xj
+
+
+def best_lag_ccc(xi: np.ndarray, xj: np.ndarray, max_lag: int) -> tuple[float, int]:
+    """Max CCC over integer sample lags in [-max_lag, max_lag]; returns (ccc, lag).
+
+    Bands timestamp the same beat up to ~0.5 s apart (different BLE notify schedules),
+    which shifts the two HR envelopes and deflates their correlation. A small bounded
+    lag scan removes that. Kept bounded because a wide max-over-lag search upward-biases
+    the score for uncorrelated series.
+    """
+    best_c: float | None = None
+    best_lag = 0
+    for lag in range(-max_lag, max_lag + 1):
+        a, b = _lag_pair(xi, xj, lag)
+        m = np.isfinite(a) & np.isfinite(b)
+        if m.sum() >= 3:
+            c = ccc(a[m], b[m])
+            if best_c is None or c > best_c:
+                best_c, best_lag = c, lag
+    return (best_c if best_c is not None else 0.0), best_lag
+
+
 def ccc(x: np.ndarray, y: np.ndarray) -> float:
     """Lin's concordance correlation coefficient over paired samples."""
     if x.size < 3:
@@ -76,6 +105,7 @@ def compute(sessions, now: float, cfg: dict) -> dict:
     mode = proc.get("sync_mode", "zscore")
     grace = proc.get("sync_grace", 10.0)
     art = cfg.get("artifact")
+    max_lag = int(round(proc.get("sync_max_lag", 0.0) * hz))  # samples; 0 disables
 
     grid = uniform_grid(now - window, now, hz)
 
@@ -107,8 +137,11 @@ def compute(sessions, now: float, cfg: dict) -> dict:
         plv[i][i] = 1.0
         for j in range(i + 1, n):
             xi, xj = hr_series[i], hr_series[j]
-            m = np.isfinite(xi) & np.isfinite(xj)
-            c = ccc(xi[m], xj[m]) if m.sum() >= 3 else 0.0
+            if max_lag > 0:
+                c, _ = best_lag_ccc(xi, xj, max_lag)
+            else:
+                m = np.isfinite(xi) & np.isfinite(xj)
+                c = ccc(xi[m], xj[m]) if m.sum() >= 3 else 0.0
             matrix[i][j] = matrix[j][i] = c
             pair_ccc.append(c)
 

@@ -6,7 +6,10 @@ processing:
   hr_smooth_tau: 3.0          # EMA time constant for smoothed instantaneous HR
   rmssd_window: 45.0          # rolling HRV window
   sync_window: 30.0           # sliding window for pairwise correlation / PLV
-  sync_max_lag: 5.0           # +/- lag scan for lead/follow (0 disables)
+  sync_max_lag: 2.0           # +/- seconds: bounded lag scan aligns the two HR
+                              #   envelopes (bands stamp beats ~0.5s apart). Keep
+                              #   small — a wide search inflates uncorrelated pairs.
+                              #   0 disables.
   sync_mode: zscore           # raw | zscore | baseline_delta
   stale_after_rr_factor: 2.5  # mark STALE if no beat within factor * expected RR
   sync_grace: 10.0            # keep a disconnected person in sync this long, then drop
