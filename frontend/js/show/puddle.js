@@ -23,7 +23,24 @@ function readTheme() {
     edge: cssVar("--edge-rgb") || "255,185,150",
     warn: cssVar("--warn") || "#e0a83c",
     text: cssVar("--text") || "#f2e4de",
+    panel: cssVar("--panel-2") || "#2e1622",
   };
+}
+
+// Human words for the identity channels, so the activation cue can say
+// "teal triangle" rather than a hex code.
+const COLOR_NAMES = {
+  "#3b6fe0": "sapphire", "#e8663f": "coral", "#17a2a2": "teal", "#e0245e": "ruby",
+  "#b07914": "gold", "#9b5de5": "amethyst", "#1f9e6f": "emerald", "#c14fa0": "orchid",
+};
+const SHAPE_WORDS = {
+  disc: "circle", ring: "ring", triangle: "triangle", square: "square",
+  diamond: "diamond", star: "star", hexagon: "hexagon", plus: "cross",
+};
+function describeIdentity(p) {
+  const col = COLOR_NAMES[(p.color || "").toLowerCase()] || "";
+  const sh = SHAPE_WORDS[p.shape] || p.shape || "";
+  return [col, sh].filter(Boolean).join(" ");
 }
 
 // Hex color -> rgba string (for glow halos).
@@ -57,6 +74,64 @@ resize();
 
 let last = performance.now();
 
+// Activation cue: announce a person when they become active (enrollment finished, or
+// a band handed to them), so each person sees their glyph + seat at hand-off.
+const CUE_MS = 5000;
+let cues = []; // {name, seat, shape, color, desc, born}
+let prevActive = null; // Set of active person_ids; null until the first frame
+
+function detectActivations(people, nowMs) {
+  const activeIds = new Set(people.map((p) => p.person_id));
+  if (prevActive === null) { prevActive = activeIds; return; } // seed; don't cue on load
+  for (const p of people) {
+    if (!prevActive.has(p.person_id)) {
+      cues.push({
+        name: p.display_name, seat: p.seat, shape: p.shape || "disc",
+        color: p.color, desc: describeIdentity(p), born: nowMs,
+      });
+    }
+  }
+  prevActive = activeIds;
+  cues = cues.filter((c) => nowMs - c.born < CUE_MS);
+}
+
+function drawCues(nowMs) {
+  let y = innerHeight * 0.13;
+  for (const c of cues) {
+    const age = (nowMs - c.born) / CUE_MS;
+    const alpha = age < 0.7 ? 1 : Math.max(0, 1 - (age - 0.7) / 0.3);
+    drawCuePill(c, innerWidth / 2, y, alpha);
+    y += 58;
+  }
+}
+
+function drawCuePill(c, midX, y, alpha) {
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.font = "600 16px system-ui, sans-serif";
+  const title = `${c.name}   ·   #${c.seat}`;
+  const sub = c.desc;
+  ctx.font = "13px system-ui, sans-serif";
+  const subW = ctx.measureText(sub).width;
+  ctx.font = "600 16px system-ui, sans-serif";
+  const titleW = ctx.measureText(title).width;
+  const padL = 56, padR = 22, h = 46;
+  const w = padL + Math.max(titleW, subW) + padR;
+  const x = midX - w / 2;
+  if (ctx.roundRect) { ctx.beginPath(); ctx.roundRect(x, y, w, h, 13); }
+  else { ctx.beginPath(); ctx.rect(x, y, w, h); }
+  ctx.fillStyle = TH.panel;
+  ctx.fill();
+  ctx.lineWidth = 1.5; ctx.strokeStyle = c.color; ctx.stroke();
+  drawGlyph(ctx, c.shape, x + 28, y + h / 2, 12, c.color, { glow: 8, alpha });
+  ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
+  ctx.fillStyle = TH.text; ctx.font = "600 16px system-ui, sans-serif";
+  ctx.fillText(title, x + padL, y + 20);
+  ctx.fillStyle = hexA(TH.text, 0.6); ctx.font = "13px system-ui, sans-serif";
+  ctx.fillText(sub, x + padL, y + 37);
+  ctx.restore();
+}
+
 function targetAlpha(p) {
   if (p.enrollment !== "active") return 0;
   switch (p.connection) {
@@ -82,6 +157,7 @@ function frameTick(nowMs) {
   ctx.fillRect(0, 0, W, H);
 
   const people = (frame?.people || []).filter((p) => p.enrollment === "active");
+  detectActivations(people, nowMs);
   const order = frame?.synchrony?.order_param ?? 0;
   const cohesion = frame?.synchrony?.cohesion ?? 0;
   const ids = frame?.synchrony?.person_ids || [];
@@ -197,6 +273,9 @@ function frameTick(nowMs) {
   }
   ctx.textAlign = "left";
   ctx.textBaseline = "alphabetic";
+
+  // Activation cues (drawn on top).
+  drawCues(nowMs);
 
   // Subtle hint + connection banner.
   ctx.fillStyle = hexA(TH.text, 0.28);

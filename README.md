@@ -20,8 +20,11 @@ Neuroscience 2022). We quantify it two ways:
 - **Concordance (matrix):** windowed Lin's concordance of smoothed HR between each
   pair. Under the default `zscore` normalization this equals windowed Pearson
   correlation (pure dynamics, offset-invariant).
-- **Phase-locking / Kuramoto order parameter:** from beat-interpolated oscillator
-  phase — offset-robust, and the single "how synced is the puddle" scalar.
+- **Phase-locking / Kuramoto order parameter (R):** the length of the average of
+  everyone's beat-phase unit vectors — offset-robust, and the single "how synced is
+  the puddle" scalar (0–1). Note R is *not* 0 at no-sync: for N independent people it
+  sits around 1/√N (~0.45 for 5), so judge synchrony by R rising above that baseline.
+  It's complementary to cohesion — R measures beat *timing*, cohesion the HR *dynamics*.
 
 Because individual physiology differs (resting HR, HRV, respiration), each person is
 **baselined** at rest and their signal normalized before comparison.
@@ -101,8 +104,10 @@ The backend serves one WebSocket stream (`/ws`) to two decoupled pages, meant to
 in parallel on different monitors:
 
 - **`/` Show** — the final visualization: a clean, full-screen "puddle." Each person
-  is a glyph on a phase ring; when people synchronize their glyphs clump and pulse as
-  one, with a central bloom scaled by group cohesion. Press **L** to cycle on-dot
+  is a glyph at a fixed seat on the ring; the beat is an in-place pulse, and as group
+  cohesion rises everyone eases inward and gathers (spreading back out when out of
+  sync). When someone becomes active (enrolled or handed a band) a brief cue announces
+  their glyph + seat ("Wren · #1 — sapphire circle"). Press **L** to cycle on-dot
   labels (none → initials → seat number).
 - **`/ops` Ops** — the technical status: per-band connection lifecycle, raw HR/RR
   trace + signal quality, the abstract per-person signal, and the synchrony heatmap.
