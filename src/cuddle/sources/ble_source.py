@@ -94,6 +94,9 @@ class DirectBleSource:
     def bind(self, device_id: str, person_id: str) -> None:
         self._bindings[device_id] = person_id
 
+    def unbind(self, device_id: str) -> None:
+        self._bindings.pop(device_id, None)
+
     # ---- internals ------------------------------------------------------
 
     async def _scan_loop(self) -> None:

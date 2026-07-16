@@ -33,6 +33,11 @@ class RebindBody(BaseModel):
     device_id: str
 
 
+class ReassignBody(BaseModel):
+    device_id: str
+    person_id: str
+
+
 class PersonBody(BaseModel):
     person_id: str
 
@@ -109,6 +114,16 @@ def create_app(engine) -> FastAPI:
     @app.post("/api/rebind")
     async def rebind(body: RebindBody) -> JSONResponse:
         engine.rebind(body.person_id, body.device_id)
+        return JSONResponse({"ok": True})
+
+    @app.post("/api/reassign")
+    async def reassign(body: ReassignBody) -> JSONResponse:
+        engine.reassign(body.device_id, body.person_id)
+        return JSONResponse({"ok": True})
+
+    @app.post("/api/release")
+    async def release(body: PersonBody) -> JSONResponse:
+        engine.release(body.person_id)
         return JSONResponse({"ok": True})
 
     @app.post("/api/baseline/start")

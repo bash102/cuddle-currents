@@ -111,6 +111,12 @@ class Engine:
     def rebind(self, person_id: str, device_id: str) -> None:
         self.enrollment.rebind(person_id, device_id)
 
+    def reassign(self, device_id: str, person_id: str) -> None:
+        self.enrollment.assign_device(device_id, person_id)
+
+    def release(self, person_id: str) -> None:
+        self.enrollment.release_device(person_id)
+
     def start_baseline(self, person_id: str) -> None:
         self.enrollment.start_baseline(person_id)
 

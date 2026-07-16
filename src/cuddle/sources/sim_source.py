@@ -133,6 +133,9 @@ class SimulatorSource:
     def bind(self, device_id: str, person_id: str) -> None:
         self._bindings[device_id] = person_id
 
+    def unbind(self, device_id: str) -> None:
+        self._bindings.pop(device_id, None)
+
     @property
     def scenario_name(self) -> str:
         return self._scenario.name
@@ -293,6 +296,9 @@ class ReplaySource:
 
     def bind(self, device_id: str, person_id: str) -> None:
         self._bindings[device_id] = person_id
+
+    def unbind(self, device_id: str) -> None:
+        self._bindings.pop(device_id, None)
 
     async def _run(self) -> None:
         while self._running:

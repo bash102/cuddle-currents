@@ -88,6 +88,15 @@ class SessionStore:
         if sess:
             sess.profile.device_id = device_id
 
+    def unbind_device(self, device_id: str) -> str | None:
+        """Free a device from its current owner. Returns the prior owner's id."""
+        pid = self._device_to_person.pop(device_id, None)
+        if pid:
+            sess = self._sessions.get(pid)
+            if sess and sess.profile.device_id == device_id:
+                sess.profile.device_id = None
+        return pid
+
     def person_for_device(self, device_id: str) -> str | None:
         return self._device_to_person.get(device_id)
 

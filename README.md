@@ -62,6 +62,15 @@ Each person gets a unique visual identity — a **color × shape** glyph (8 colo
 anyone can find their own dot ("you're #7, the teal triangle"). The glyph and seat
 show on every Ops card; on the Show view, press **L** to reveal initials or numbers.
 
+**Reusing bands across people** (for when you have fewer bands than people): on an
+Ops person card, the **band ▸** menu hands that person's band to someone else or
+**releases** it. A released person is *parked* — kept in the roster with their name,
+identity, and baseline, just without a band — and their freed band returns to the
+**Unassigned devices** list, where an **assign to parked…** menu can hand it to any
+parked person. Reassigning to someone who's already baselined reactivates them
+instantly (no re-baseline). So a handful of bands can rotate through many people
+while every person's baseline is retained.
+
 ### Simulator scenarios (`--scenario`, sim only, switchable live in Ops)
 
 | Scenario | What it shows |

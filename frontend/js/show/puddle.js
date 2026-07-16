@@ -128,17 +128,28 @@ function frameTick(nowMs) {
     if (a.alpha < 0.02) anim.delete(id);
   }
 
-  // Position each blob on the ring by its phase; compute pulse from phase.
+  // Each person keeps a *stable seat* around the ring (no orbital spin — the beat is
+  // shown as an in-place pulse). As group cohesion rises, everyone eases inward and
+  // gathers into a tighter puddle; when out of sync they spread back to the rim.
+  const ordered = [...people].sort((x, y) => (x.seat || 0) - (y.seat || 0));
+  const N = ordered.length;
+  const targetRadius = ring * (1 - 0.5 * bloom);
   const pos = new Map();
-  for (const p of people) {
+  ordered.forEach((p, rank) => {
     const a = anim.get(p.person_id);
-    if (!a) continue;
-    const ang = a.phase % (2 * Math.PI);
-    const x = cx + ring * Math.cos(ang);
-    const y = cy + ring * Math.sin(ang);
-    a.x = x; a.y = y;
+    if (!a) return;
+    const targetAng = -Math.PI / 2 + (2 * Math.PI * rank) / Math.max(1, N);
+    if (a.ang === undefined) { a.ang = targetAng; a.rad = targetRadius; }
+    // ease angle along the shortest path so joins/leaves glide rather than jump
+    let d = targetAng - a.ang;
+    while (d > Math.PI) d -= 2 * Math.PI;
+    while (d < -Math.PI) d += 2 * Math.PI;
+    a.ang += d * Math.min(1, dt * 2);
+    a.rad += (targetRadius - a.rad) * Math.min(1, dt * 1.5);
+    a.x = cx + a.rad * Math.cos(a.ang);
+    a.y = cy + a.rad * Math.sin(a.ang);
     pos.set(p.person_id, a);
-  }
+  });
 
   // Synchrony edges.
   for (let i = 0; i < ids.length; i++) {

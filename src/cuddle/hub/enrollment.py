@@ -81,7 +81,7 @@ class EnrollmentManager:
     # ---- enrollment actions ---------------------------------------------
 
     def assign(self, device_id: str, display_name: str, color: str | None = None) -> PersonProfile:
-        """Bind a discovered device to a new (or renamed) person."""
+        """Enroll a brand-new person on a device (releasing any prior owner)."""
         person_id = self._unique_person_id(display_name)
         seat = self._next_seat
         self._next_seat += 1
@@ -92,23 +92,66 @@ class EnrollmentManager:
             color=color or seat_color,
             shape=shape,
             seat=seat,
-            device_id=device_id,
             enrollment_state=EnrollmentState.assigned,
         )
         self._store.create_person(profile)
+        self.assign_device(device_id, person_id)
+        return self._store.get(person_id).profile
+
+    def assign_device(self, device_id: str, person_id: str) -> None:
+        """Move a device onto an existing person, freeing the prior owner.
+
+        The core primitive for hardware reuse: the previous holder of the band is
+        *parked* (retains identity + baseline, just loses the device), and the target
+        goes straight to ``active`` if they already have a baseline — no re-baseline
+        needed. This is what lets a limited set of bands rotate across people.
+        """
+        target = self._store.get(person_id)
+        if not target:
+            raise KeyError(person_id)
+
+        prev = self._store.person_for_device(device_id)
+        if prev and prev != person_id:
+            self._park(prev)
+
         self._store.bind_device(device_id, person_id)
         self._source.bind(device_id, person_id)
+
+        if target.profile.calibration.is_calibrated:
+            target.profile.enrollment_state = EnrollmentState.active
+        elif target.profile.enrollment_state in (
+            EnrollmentState.discovered,
+            EnrollmentState.retired,
+            EnrollmentState.calibrated,
+        ):
+            target.profile.enrollment_state = EnrollmentState.assigned
         self.save()
-        return profile
 
     def rebind(self, person_id: str, device_id: str) -> None:
-        """Swap a person onto a different band (e.g. battery swap), keep identity."""
+        """Give an existing person a (possibly different) band — alias of assign_device."""
+        self.assign_device(device_id, person_id)
+
+    def release_device(self, person_id: str) -> None:
+        """Park a person: free their band but keep them in the roster with baseline."""
+        self._park(person_id)
+        self.save()
+
+    def _park(self, person_id: str) -> None:
         sess = self._store.get(person_id)
         if not sess:
-            raise KeyError(person_id)
-        self._store.bind_device(device_id, person_id)
-        self._source.bind(device_id, person_id)
-        self.save()
+            return
+        dev = sess.profile.device_id
+        if dev:
+            self._store.unbind_device(dev)
+            self._source.unbind(dev)  # return the band to the unassigned pool
+        sess.profile.device_id = None
+        self._baselines.pop(person_id, None)
+        # Retain baseline: a calibrated person parks as `calibrated`; otherwise back
+        # to `assigned` (still in the roster, just without a band).
+        if sess.profile.calibration.is_calibrated:
+            sess.profile.enrollment_state = EnrollmentState.calibrated
+        else:
+            sess.profile.enrollment_state = EnrollmentState.assigned
 
     def start_baseline(self, person_id: str) -> None:
         sess = self._store.get(person_id)

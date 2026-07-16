@@ -42,3 +42,7 @@ class SampleSource(Protocol):
         binding they carry a provisional id equal to the device_id.
         """
         ...
+
+    def unbind(self, device_id: str) -> None:
+        """Forget a device's person binding, returning it to the unassigned pool."""
+        ...

@@ -43,6 +43,28 @@ const el = (id) => document.getElementById(id);
 const peopleNodes = new Map();
 const deviceNodes = new Map();
 
+// Latest roster (all people), so both panels can offer reassignment targets.
+let roster = [];
+const notRetired = (p) => p.enrollment !== "retired";
+const otherPeople = (self) => roster.filter((p) => notRetired(p) && p.person_id !== self);
+const parkedPeople = () => roster.filter((p) => notRetired(p) && !p.device_id);
+
+// Repopulate a <select> only when its option set changes and the user isn't using
+// it (avoids flicker / fighting an open dropdown at 10 Hz).
+function syncSelect(sel, opts) {
+  if (document.activeElement === sel) return;
+  const sig = opts.map((o) => `${o.value}:${o.label}`).join("|");
+  if (sel.dataset.sig === sig) return;
+  sel.dataset.sig = sig;
+  sel.innerHTML = "";
+  for (const o of opts) {
+    const el = document.createElement("option");
+    el.value = o.value;
+    el.textContent = o.label;
+    sel.appendChild(el);
+  }
+}
+
 // ---- controls ---------------------------------------------------------------
 
 function initControls() {
@@ -66,18 +88,35 @@ function reconcileDevices(devices) {
       node.innerHTML = `
         <div class="devhead"><span class="devid"></span><span class="devhr"></span></div>
         <div class="enrollrow">
-          <input class="nameinput" placeholder="name…" />
+          <input class="nameinput" placeholder="new name…" />
           <button class="enrollbtn">Enroll</button>
-        </div>`;
+        </div>
+        <select class="assignsel" title="assign this band to an existing (parked) person"></select>`;
       node.querySelector(".enrollbtn").addEventListener("click", async () => {
         const name = node.querySelector(".nameinput").value.trim() || d.device_id;
         await post("/api/enroll", { device_id: d.device_id, display_name: name });
+      });
+      const assignSel = node.querySelector(".assignsel");
+      assignSel.addEventListener("change", async () => {
+        const v = assignSel.value;
+        assignSel.value = "__new__";
+        assignSel.dataset.sig = "";
+        if (v && v !== "__new__") {
+          await post("/api/reassign", { device_id: d.device_id, person_id: v });
+        }
       });
       deviceNodes.set(d.device_id, node);
       wrap.appendChild(node);
     }
     node.querySelector(".devid").textContent = d.device_id;
     node.querySelector(".devhr").textContent = d.hr_bpm != null ? `${d.hr_bpm} bpm` : "—";
+    const parked = parkedPeople();
+    const assignSel = node.querySelector(".assignsel");
+    assignSel.style.display = parked.length ? "" : "none";
+    syncSelect(assignSel, [
+      { value: "__new__", label: "assign to parked…" },
+      ...parked.map((p) => ({ value: p.person_id, label: `→ ${p.display_name} (#${p.seat})` })),
+    ]);
   }
   for (const [id, node] of deviceNodes) if (!seen.has(id)) { node.remove(); deviceNodes.delete(id); }
   el("unassignedEmpty").style.display = devices.length ? "none" : "block";
@@ -112,6 +151,7 @@ function makePersonCard(p) {
       <span class="conn"></span>
       <span class="enroll"></span>
       <span class="grow"></span>
+      <select class="reassign" title="hand this band to another person, or release it"></select>
       <button class="baselinebtn">Baseline</button>
     </div>
     <div class="metrics">
@@ -124,8 +164,9 @@ function makePersonCard(p) {
     <div class="baseprog"><div class="basefill"></div></div>`;
   root.querySelector(".baselinebtn").addEventListener("click", () =>
     post("/api/baseline/start", { person_id: p.person_id }));
-  return {
+  const n = {
     root,
+    data: p, // latest person state, refreshed each frame
     glyph: root.querySelector(".glyph"),
     seat: root.querySelector(".seat"),
     name: root.querySelector(".name"),
@@ -141,11 +182,37 @@ function makePersonCard(p) {
     baseprog: root.querySelector(".baseprog"),
     basefill: root.querySelector(".basefill"),
     baselinebtn: root.querySelector(".baselinebtn"),
+    reassign: root.querySelector(".reassign"),
   };
+  n.reassign.addEventListener("change", async () => {
+    const v = n.reassign.value;
+    n.reassign.value = "__keep__";
+    n.reassign.dataset.sig = "";
+    n.reassign.blur();
+    const cur = n.data;
+    if (v === "__release__") {
+      await post("/api/release", { person_id: cur.person_id });
+    } else if (v && !v.startsWith("__") && cur.device_id) {
+      await post("/api/reassign", { device_id: cur.device_id, person_id: v });
+    }
+  });
+  return n;
 }
 
 function updatePersonCard(n, p) {
+  n.data = p;
   const c = connColor(p.connection);
+  // Reassign control: only meaningful when this person currently holds a band.
+  n.reassign.style.display = p.device_id ? "" : "none";
+  if (p.device_id) {
+    syncSelect(n.reassign, [
+      { value: "__keep__", label: "band ▸" },
+      { value: "__release__", label: "release band" },
+      ...otherPeople(p.person_id).map((o) => ({
+        value: o.person_id, label: `→ ${o.display_name} (#${o.seat})`,
+      })),
+    ]);
+  }
   // identity glyph (color x shape) + seat number
   const g = n.glyph.getContext("2d");
   g.clearRect(0, 0, n.glyph.width, n.glyph.height);
@@ -247,12 +314,14 @@ function heatColor(v) {
 // ---- wire up ----------------------------------------------------------------
 
 function render(frame) {
+  const t = theme();
   el("serverState").textContent = isConnected() ? "connected" : "disconnected";
-  el("serverState").style.color = isConnected() ? "#5fbf7f" : "#e0724f";
+  el("serverState").style.color = isConnected() ? t.good : t.bad;
   el("sourceLabel").textContent = frame.source || "—";
   el("scenarioLabel").textContent = frame.scenario || "—";
+  roster = frame.people || [];
+  reconcilePeople(roster);
   reconcileDevices(frame.unassigned || []);
-  reconcilePeople(frame.people || []);
   drawHeatmap(frame.synchrony);
 }
 
