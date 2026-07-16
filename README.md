@@ -140,6 +140,9 @@ Key modules:
 - `sources/ble_parser.py` — pure `0x2A37` decoder (golden-tested).
 - `sources/sim_source.py` — Kuramoto-coupled cardiac-oscillator simulator + replay.
 - `hub/enrollment.py`, `processing/baseline.py` — enroll → baseline → active flow.
+- `processing/artifact.py` — beat-level spike correction (Hampel + Malik floor +
+  missed/extra-beat repair) feeding HRV/synchrony; surgical so it doesn't flatten the
+  real dynamics the coherence metric reads. Config under `artifact:` in `app.yaml`.
 - `processing/synchrony.py` — concordance + PLV + group cohesion.
 
 ## Roadmap (Phase 2)

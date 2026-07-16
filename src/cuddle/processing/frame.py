@@ -53,6 +53,7 @@ def build_frame(
         connection = _connection_for(session, source_states, now, cfg)
         session.connection = connection
         quality, flags = signal_quality.assess(session, now, cfg)
+        art = cfg.get("artifact")
 
         people.append(
             PersonState(
@@ -66,14 +67,15 @@ def build_frame(
                 enrollment=p.enrollment_state,
                 quality=round(quality, 3),
                 quality_flags=flags,
-                hr=_round(abstract.current_hr(session, proc["hr_smooth_tau"])),
+                hr=_round(abstract.current_hr(session, proc["hr_smooth_tau"], art)),
                 hr_var=_round(
                     abstract.windowed_hr_std(
-                        session, now, proc["sync_window"], proc["resample_hz"], proc["hr_smooth_tau"]
+                        session, now, proc["sync_window"], proc["resample_hz"],
+                        proc["hr_smooth_tau"], art,
                     )
                 ),
-                rmssd=_round(abstract.rolling_rmssd(session, now, proc["rmssd_window"])),
-                rmssd_delta=_round(abstract.rmssd_delta(session, now, proc["rmssd_window"])),
+                rmssd=_round(abstract.rolling_rmssd(session, now, proc["rmssd_window"], art)),
+                rmssd_delta=_round(abstract.rmssd_delta(session, now, proc["rmssd_window"], art)),
                 phase=_round(abstract.phase_at(session, now)),
                 last_seen=session.last_seen,
                 uptime=session.uptime(now),

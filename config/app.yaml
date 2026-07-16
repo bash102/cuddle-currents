@@ -18,6 +18,16 @@ quality:
   dropped_ratio: 1.75         # RR ~ ratio * local median => likely dropped beat
   coverage_window: 20.0
 
+artifact:                     # beat-level spike correction feeding HRV + synchrony
+  enabled: true
+  rr_min: 0.30
+  rr_max: 2.00
+  hampel_window: 5            # beats; local median/MAD window
+  hampel_sigma: 3.0           # replace beats > sigma*MAD from local median...
+  min_frac: 0.20              # ...AND > this fraction of median RR (Malik floor;
+                              #    prevents over-correcting flat resting signals)
+  repair: true                # split ~2x (missed) / merge ~0.5x (extra) beats
+
 baseline:
   duration: 120.0             # rest capture length (sim shortens this)
   min_quality: 0.6            # accept baseline only if mean quality >= this

@@ -29,6 +29,15 @@ _DEFAULTS: dict[str, Any] = {
         "dropped_ratio": 1.75,
         "coverage_window": 20.0,
     },
+    "artifact": {
+        "enabled": True,
+        "rr_min": 0.30,
+        "rr_max": 2.00,
+        "hampel_window": 5,
+        "hampel_sigma": 3.0,
+        "min_frac": 0.20,
+        "repair": True,
+    },
     "baseline": {
         "duration": 120.0,
         "min_quality": 0.6,

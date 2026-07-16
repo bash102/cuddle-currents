@@ -75,6 +75,7 @@ def compute(sessions, now: float, cfg: dict) -> dict:
     tau = proc["hr_smooth_tau"]
     mode = proc.get("sync_mode", "zscore")
     grace = proc.get("sync_grace", 10.0)
+    art = cfg.get("artifact")
 
     grid = uniform_grid(now - window, now, hz)
 
@@ -87,7 +88,7 @@ def compute(sessions, now: float, cfg: dict) -> dict:
             continue
         if s.last_seen is None or (now - s.last_seen) > grace:
             continue
-        _, hr = smoothed_hr_grid(s, now - window, now, hz, tau)
+        _, hr = smoothed_hr_grid(s, now - window, now, hz, tau, art)
         if not np.isfinite(hr).any():
             continue
         people.append(s)
