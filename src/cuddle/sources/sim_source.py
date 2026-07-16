@@ -29,6 +29,13 @@ from cuddle.sources.scenarios import Scenario, make_scenario
 
 TWO_PI = 2.0 * math.pi
 
+# When people are coupled they also co-regulate their overall arousal, so their HR
+# *envelopes* (slow level swings) drift together, not just their beat timing. This
+# shared component is what makes cross-person HR concordance (cohesion) rise with
+# sync — without it, HR wiggles are pure per-person respiration and never correlate.
+AROUSAL_HZ = 0.05  # ~20 s period
+AROUSAL_AMP = 6.0  # bpm swing at full coupling
+
 
 @dataclass
 class Oscillator:
@@ -73,6 +80,7 @@ class SimulatorSource:
         self._running = False
         self._t0: float | None = None
         self._pacer_phase: float = 0.0
+        self._arousal_phase: float = 0.0
 
     # ---- construction ----------------------------------------------------
 
@@ -100,6 +108,7 @@ class SimulatorSource:
         self._running = True
         self._t0 = clock.now()
         self._pacer_phase = 0.0
+        self._arousal_phase = 0.0
         self._schedule_dropouts()
         self._task = asyncio.create_task(self._run(), name="sim-run")
 
@@ -150,6 +159,7 @@ class SimulatorSource:
             self._states[o.device_id] = ConnectionState.connected
         self._t0 = clock.now()
         self._pacer_phase = 0.0
+        self._arousal_phase = 0.0
         self._schedule_dropouts()
 
     @property
@@ -189,6 +199,13 @@ class SimulatorSource:
         if sc.pacer:
             self._pacer_phase = (self._pacer_phase + TWO_PI * sc.pacer_hz * dt) % TWO_PI
 
+        # Shared arousal envelope: when people are coupled, blend a common slow HR
+        # swing into everyone so their HR *levels* co-move (not just their beats),
+        # scaled by how strongly they're coupled right now.
+        self._arousal_phase = (self._arousal_phase + TWO_PI * AROUSAL_HZ * dt) % TWO_PI
+        arousal_gain = min(1.0, k / 4.0)
+        shared_arousal = arousal_gain * AROUSAL_AMP * math.sin(self._arousal_phase)
+
         phases = [o.phase for o in self._oscillators]
         groups = [sc.group_of(i) for i in range(n)]
         active = [sc.active_at(i, elapsed) for i in range(n)]
@@ -213,6 +230,8 @@ class SimulatorSource:
             o._drift_phase += TWO_PI * 0.02 * dt
             hr = o.base_hr + o.hr_jitter * math.sin(o._drift_phase)
             hr += groups[i] * sc.group_hr_spread
+            if active[i]:
+                hr += shared_arousal  # coupled people share a slow HR envelope
             rsa = 1.0 + o.resp_amp * math.sin(TWO_PI * o.resp_hz * now + o.rsa_phase)
             omega = TWO_PI * (hr / 60.0) * rsa
 

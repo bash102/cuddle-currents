@@ -4,15 +4,20 @@ Two complementary measures over a sliding window on a common uniform grid:
 
 - **Concordance (matrix)** — Lin's concordance correlation coefficient (CCC) of the
   smoothed-HR series. CCC rewards two people whose HR *moves together*; unlike plain
-  Pearson it is NOT affine-invariant, so the per-person normalization mode genuinely
-  changes it:
+  Pearson it is NOT affine-invariant, so the per-person normalization applied first
+  genuinely changes what "together" means:
     raw            CCC on absolute HR — two people at 55 and 80 bpm score low even if
-                   their shapes match (baseline offset counts against agreement).
-    zscore         CCC on per-person z-scored HR — offset/scale removed; this equals
-                   Pearson correlation (pure dynamics). Default.
-    baseline_delta CCC on (HR - personal resting HR) — "are our departures from our
-                   own rest co-moving", which needs the baseline calibration.
-  Guardrail: modes only remove per-person mean/scale; they never touch the coupling.
+                   their shapes match (level gap counts against agreement).
+    zscore         CCC on each series standardized by ITS OWN window mean/std. That
+                   makes every series mean-0 / var-1, so CCC collapses to Pearson
+                   correlation — a pure, offset- and scale-invariant shape match, and
+                   the robust default. (Calibration-independent.)
+    baseline_delta CCC on (HR - personal resting HR): offset removed but bpm scale
+                   kept, so it rewards people whose departures from their OWN rest
+                   co-move even from different resting points. Needs the baseline.
+  Note: earlier this standardized zscore by the *resting* baseline SD, which — paired
+  with CCC — manufactured per-person variance/offset mismatch and made zscore score
+  worst; window-based standardization fixes that.
 
 - **Phase-locking (PLV) + Kuramoto order parameter** — from beat-interpolated phase.
   Offset-robust by construction, so it cross-validates the concordance matrix and is
@@ -47,13 +52,19 @@ def _transform(series: np.ndarray, mode: str, cal) -> np.ndarray:
     if finite.size == 0:
         return series
     if mode == "raw":
+        # Absolute HR: CCC penalizes differing resting levels between people.
         return series
     if mode == "baseline_delta":
+        # Deviation from each person's own resting HR (offset removed, natural bpm
+        # scale kept) — "are our departures from our own rest co-moving". Uses the
+        # baseline calibration; falls back to the window mean when uncalibrated.
         rest = cal.resting_hr if cal and cal.resting_hr else float(np.nanmean(series))
         return series - rest
-    # zscore (default)
-    mu = cal.hr_mean if (cal and cal.hr_mean is not None) else float(np.nanmean(series))
-    sd = cal.hr_std if (cal and cal.hr_std) else float(np.nanstd(finite)) or 1.0
+    # zscore (default): standardize by THIS window's own mean/std (not the resting
+    # baseline). That makes each series mean-0 / var-1 in-window, so CCC reduces to
+    # Pearson correlation — a pure, offset- and scale-invariant "shape" match.
+    mu = float(np.nanmean(series))
+    sd = float(np.nanstd(finite)) or 1.0
     return (series - mu) / sd
 
 

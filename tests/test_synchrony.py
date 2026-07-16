@@ -2,7 +2,8 @@
 
 import numpy as np
 
-from cuddle.processing.synchrony import _kuramoto_order, ccc
+from cuddle.core.models import Calibration
+from cuddle.processing.synchrony import _kuramoto_order, _transform, ccc
 
 
 def test_ccc_identical_series():
@@ -33,6 +34,41 @@ def test_ccc_offset_penalized_but_not_for_zscore():
     zx = (x - x.mean()) / x.std()
     zy = (y - y.mean()) / y.std()
     assert ccc(zx, zy) > 0.99  # equals Pearson after z-scoring
+
+
+def test_zscore_transform_uses_window_stats_not_baseline():
+    # Even with a (misleading) baseline calibration, zscore standardizes by the
+    # window's own mean/std -> output is mean 0, std 1.
+    x = np.sin(np.linspace(0, 6 * np.pi, 200)) * 4 + 70
+    cal = Calibration(hr_mean=50.0, hr_std=1.0)  # deliberately wrong-for-window
+    z = _transform(x, "zscore", cal)
+    assert abs(float(z.mean())) < 1e-9
+    assert abs(float(z.std()) - 1.0) < 1e-9
+
+
+def test_zscore_ccc_equals_pearson():
+    # CCC on window-z-scored series should equal Pearson correlation of the originals,
+    # regardless of per-series offset and scale.
+    rng = np.random.default_rng(3)
+    base = np.cumsum(rng.normal(size=300))
+    x = 3.0 * base + 60
+    y = 0.5 * base + rng.normal(scale=0.2, size=300) + 80  # correlated, diff scale/offset
+    pearson = float(np.corrcoef(x, y)[0, 1])
+    zc = ccc(_transform(x, "zscore", None), _transform(y, "zscore", None))
+    assert abs(zc - pearson) < 1e-6
+
+
+def test_zscore_not_worse_than_raw_for_similar_dynamics():
+    # Two people, same shape, different scale + offset: raw is dragged down by the
+    # level/scale gap; zscore (pure shape) stays high.
+    t = np.linspace(0, 6 * np.pi, 240)
+    shape = np.sin(t) + 0.3 * np.sin(2.3 * t)
+    x = 2.0 * shape + 62
+    y = 6.0 * shape + 78
+    raw = ccc(_transform(x, "raw", None), _transform(y, "raw", None))
+    zc = ccc(_transform(x, "zscore", None), _transform(y, "zscore", None))
+    assert zc > 0.99
+    assert zc > raw
 
 
 def test_kuramoto_order_locked_vs_scattered():
