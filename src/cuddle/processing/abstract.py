@@ -41,6 +41,22 @@ def current_hr(session: PersonSession, tau: float) -> float | None:
     return float(smooth[-1])
 
 
+def windowed_hr_std(
+    session: PersonSession, now: float, window: float, hz: float, tau: float
+) -> float | None:
+    """SD (bpm) of the smoothed HR over the sync window.
+
+    This is exactly the amplitude that shape-based synchrony (zscore/Pearson) divides
+    out. When it's near the sensor noise floor (~<1-2 bpm) the HR is essentially flat,
+    so zscore correlates noise and is unreliable — raw/level agreement is what to trust.
+    """
+    _, hr = smoothed_hr_grid(session, now - window, now, hz, tau)
+    finite = hr[np.isfinite(hr)]
+    if finite.size < 3:
+        return None
+    return float(np.std(finite))
+
+
 def rolling_rmssd(session: PersonSession, now: float, window: float) -> float | None:
     t, rr = session.rr.window(now - window, now)
     if rr.size < 2:

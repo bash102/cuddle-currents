@@ -67,6 +67,11 @@ def build_frame(
                 quality=round(quality, 3),
                 quality_flags=flags,
                 hr=_round(abstract.current_hr(session, proc["hr_smooth_tau"])),
+                hr_var=_round(
+                    abstract.windowed_hr_std(
+                        session, now, proc["sync_window"], proc["resample_hz"], proc["hr_smooth_tau"]
+                    )
+                ),
                 rmssd=_round(abstract.rolling_rmssd(session, now, proc["rmssd_window"])),
                 rmssd_delta=_round(abstract.rmssd_delta(session, now, proc["rmssd_window"])),
                 phase=_round(abstract.phase_at(session, now)),

@@ -156,6 +156,7 @@ function makePersonCard(p) {
     </div>
     <div class="metrics">
       <div class="metric"><label>HR</label><span class="hr">—</span></div>
+      <div class="metric"><label>HR± var</label><span class="hrvar">—</span></div>
       <div class="metric"><label>RMSSD</label><span class="rmssd">—</span></div>
       <div class="metric"><label>ΔHRV</label><span class="hrvd">—</span></div>
     </div>
@@ -173,6 +174,7 @@ function makePersonCard(p) {
     conn: root.querySelector(".conn"),
     enroll: root.querySelector(".enroll"),
     hr: root.querySelector(".hr"),
+    hrvar: root.querySelector(".hrvar"),
     rmssd: root.querySelector(".rmssd"),
     hrvd: root.querySelector(".hrvd"),
     qualfill: root.querySelector(".qualfill"),
@@ -223,6 +225,16 @@ function updatePersonCard(n, p) {
   n.conn.style.color = c;
   n.enroll.textContent = ENROLL_LABEL[p.enrollment] || p.enrollment;
   n.hr.textContent = p.hr != null ? `${p.hr.toFixed(0)}` : "—";
+  // HR variability over the sync window. Below ~1.5 bpm the signal is too flat for
+  // shape-based synchrony (zscore) to be trustworthy — flag it amber.
+  if (p.hr_var != null) {
+    n.hrvar.textContent = `${p.hr_var.toFixed(1)}`;
+    n.hrvar.style.color = p.hr_var < 1.5 ? theme().warn : "";
+    n.hrvar.title = p.hr_var < 1.5 ? "flat signal — zscore/shape sync unreliable; trust raw" : "";
+  } else {
+    n.hrvar.textContent = "—";
+    n.hrvar.style.color = "";
+  }
   n.rmssd.textContent = p.rmssd != null ? `${p.rmssd.toFixed(0)} ms` : "—";
   n.hrvd.textContent = p.rmssd_delta != null ? `${p.rmssd_delta >= 0 ? "+" : ""}${p.rmssd_delta.toFixed(0)}%` : "—";
 

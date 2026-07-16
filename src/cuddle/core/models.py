@@ -112,6 +112,7 @@ class PersonState(BaseModel):
     quality: float = 0.0  # 0..1
     quality_flags: list[str] = Field(default_factory=list)
     hr: float | None = None  # smoothed instantaneous HR
+    hr_var: float | None = None  # SD of smoothed HR over the sync window (bpm)
     rmssd: float | None = None  # rolling HRV
     rmssd_delta: float | None = None  # relative to personal baseline, if calibrated
     phase: float | None = None  # oscillator phase, radians 0..2pi
