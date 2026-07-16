@@ -158,13 +158,16 @@ function frameTick(nowMs) {
 
   const people = (frame?.people || []).filter((p) => p.enrollment === "active");
   detectActivations(people, nowMs);
-  const order = frame?.synchrony?.order_param ?? 0;
   const cohesion = frame?.synchrony?.cohesion ?? 0;
   const ids = frame?.synchrony?.person_ids || [];
   const matrix = frame?.synchrony?.matrix || [];
 
-  // Central bloom scales with group cohesion / order parameter.
-  const bloom = Math.max(order, (cohesion + 1) / 2);
+  // The puddle's gathering + bloom are driven by concordance COHESION (mean pairwise
+  // HR co-movement), not the phase-based order R: across real bands the beat-phase
+  // reconstruction is noisy (sub-second timestamp jitter), so order R under-reports
+  // sync, while cohesion is robust. cohesion is in [-1,1]; 0 (uncorrelated/anti) =>
+  // no bloom, 1 (fully concordant) => full gather.
+  const bloom = Math.max(0, Math.min(1, cohesion));
   const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, ring * (0.6 + bloom));
   g.addColorStop(0, `rgba(${TH.bloom},${0.05 + 0.30 * bloom})`);
   g.addColorStop(1, `rgba(${TH.bloom},0)`);
