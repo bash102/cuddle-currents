@@ -44,12 +44,54 @@ function describeIdentity(p) {
 }
 
 // Hex color -> rgba string (for glow halos).
-function hexA(hex, a) {
+function hexToRgb(hex) {
   const h = hex.replace("#", "");
-  const r = parseInt(h.slice(0, 2), 16);
-  const g = parseInt(h.slice(2, 4), 16);
-  const b = parseInt(h.slice(4, 6), 16);
+  return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16)];
+}
+function hexA(hex, a) {
+  const [r, g, b] = hexToRgb(hex);
   return `rgba(${r},${g},${b},${a})`;
+}
+function avgRgb(hexes) {
+  const s = [0, 0, 0];
+  for (const hx of hexes) { const c = hexToRgb(hx); s[0] += c[0]; s[1] += c[1]; s[2] += c[2]; }
+  const n = Math.max(1, hexes.length);
+  return `${Math.round(s[0] / n)},${Math.round(s[1] / n)},${Math.round(s[2] / n)}`;
+}
+
+// Force-directed layout constants, scaled to the viewport. Tuned for gentle motion:
+// a hard speed cap (maxSpeed) keeps dots slow; the force ratios set the layout.
+function FORCE(ring, n) {
+  const scale = ring / 0.3; // ~ min(W,H)
+  return {
+    center: 0.9,                     // pull to center (keeps clusters balanced on screen)
+    repulse: scale * scale * 0.04,   // close-range anti-overlap
+    attract: 55,                     // signed spring magnitude (concordance-weighted)
+    rest: scale * 0.055,             // desired neighbor spacing within a group
+    attractThresh: 0.25,             // concordance at which the spring is neutral
+    clusterThresh: 0.35,             // concordance above this = same group (for glow)
+    mobility: 1.0,                   // overdamped: velocity = force * mobility
+    maxSpeed: scale * 0.12,          // px/sec hard cap -> never fast
+  };
+}
+
+// Union-find clustering: group people whose pairwise concordance exceeds a threshold.
+function detectClusters(ids, matrix, thresh) {
+  const n = ids.length;
+  const parent = ids.map((_, i) => i);
+  const find = (i) => { while (parent[i] !== i) { parent[i] = parent[parent[i]]; i = parent[i]; } return i; };
+  for (let i = 0; i < n; i++) {
+    for (let j = i + 1; j < n; j++) {
+      if ((matrix[i]?.[j] ?? 0) > thresh) parent[find(i)] = find(j);
+    }
+  }
+  const groups = new Map();
+  ids.forEach((id, i) => {
+    const r = find(i);
+    if (!groups.has(r)) groups.set(r, []);
+    groups.get(r).push(id);
+  });
+  return [...groups.values()];
 }
 
 // Label toggle: press L to cycle none -> initials -> seat number. Off by default so
@@ -158,31 +200,22 @@ function frameTick(nowMs) {
 
   const people = (frame?.people || []).filter((p) => p.enrollment === "active");
   detectActivations(people, nowMs);
-  const cohesion = frame?.synchrony?.cohesion ?? 0;
   const ids = frame?.synchrony?.person_ids || [];
   const matrix = frame?.synchrony?.matrix || [];
+  const idIndex = new Map(ids.map((id, k) => [id, k]));
 
-  // The puddle's gathering + bloom are driven by concordance COHESION (mean pairwise
-  // HR co-movement), not the phase-based order R: across real bands the beat-phase
-  // reconstruction is noisy (sub-second timestamp jitter), so order R under-reports
-  // sync, while cohesion is robust. cohesion is in [-1,1]; 0 (uncorrelated/anti) =>
-  // no bloom, 1 (fully concordant) => full gather.
-  const bloom = Math.max(0, Math.min(1, cohesion));
-  const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, ring * (0.6 + bloom));
-  g.addColorStop(0, `rgba(${TH.bloom},${0.05 + 0.30 * bloom})`);
-  g.addColorStop(1, `rgba(${TH.bloom},0)`);
-  ctx.fillStyle = g;
-  ctx.beginPath();
-  ctx.arc(cx, cy, ring * (0.6 + bloom), 0, Math.PI * 2);
-  ctx.fill();
-
-  // Reconcile animation state with the latest frame.
+  // Reconcile per-person animation state with the latest frame.
   const seen = new Set();
   for (const p of people) {
     seen.add(p.person_id);
     let a = anim.get(p.person_id);
     if (!a) {
-      a = { phase: p.phase ?? 0, hr: p.hr ?? 60, alpha: 0, color: p.color, name: p.display_name };
+      const ang = Math.random() * 2 * Math.PI, rad = ring * (0.25 + 0.25 * Math.random());
+      a = {
+        pid: p.person_id, phase: p.phase ?? 0, hr: p.hr ?? 60, alpha: 0,
+        color: p.color, name: p.display_name,
+        x: cx + rad * Math.cos(ang), y: cy + rad * Math.sin(ang),
+      };
       anim.set(p.person_id, a);
     }
     a.color = p.color;
@@ -190,7 +223,7 @@ function frameTick(nowMs) {
     a.shape = p.shape || "disc";
     a.seat = p.seat || 0;
     a.hr = p.hr ?? a.hr;
-    // Advance local phase by heart rate; nudge toward the server phase.
+    // Advance local phase by heart rate; nudge toward the server phase (beat pulse).
     a.phase += (a.hr / 60) * 2 * Math.PI * dt;
     if (typeof p.phase === "number") {
       let err = p.phase - (a.phase % (2 * Math.PI));
@@ -207,30 +240,63 @@ function frameTick(nowMs) {
     if (a.alpha < 0.02) anim.delete(id);
   }
 
-  // Each person keeps a *stable seat* around the ring (no orbital spin — the beat is
-  // shown as an in-place pulse). As group cohesion rises, everyone eases inward and
-  // gathers into a tighter puddle; when out of sync they spread back to the rim.
-  const ordered = [...people].sort((x, y) => (x.seat || 0) - (y.seat || 0));
-  const N = ordered.length;
-  const targetRadius = ring * (1 - 0.5 * bloom);
-  const pos = new Map();
-  ordered.forEach((p, rank) => {
-    const a = anim.get(p.person_id);
-    if (!a) return;
-    const targetAng = -Math.PI / 2 + (2 * Math.PI * rank) / Math.max(1, N);
-    if (a.ang === undefined) { a.ang = targetAng; a.rad = targetRadius; }
-    // ease angle along the shortest path so joins/leaves glide rather than jump
-    let d = targetAng - a.ang;
-    while (d > Math.PI) d -= 2 * Math.PI;
-    while (d < -Math.PI) d += 2 * Math.PI;
-    a.ang += d * Math.min(1, dt * 2);
-    a.rad += (targetRadius - a.rad) * Math.min(1, dt * 1.5);
-    a.x = cx + a.rad * Math.cos(a.ang);
-    a.y = cy + a.rad * Math.sin(a.ang);
-    pos.set(p.person_id, a);
-  });
+  // ---- Force-directed layout: matching dots attract, so groups cluster ----
+  // Concordance is the attraction between a pair; all dots mildly repel to keep
+  // spacing; a weak pull to center keeps the whole thing on screen. Overdamped with a
+  // hard speed cap so nothing ever moves fast — clusters ease into place. When two
+  // sub-groups each sync internally but not across, they settle into separate clumps.
+  const nodes = people.map((p) => anim.get(p.person_id)).filter(Boolean);
+  const K = FORCE(ring, nodes.length);
+  const fx = new Map(), fy = new Map();
+  for (const a of nodes) { fx.set(a, (cx - a.x) * K.center); fy.set(a, (cy - a.y) * K.center); }
+  for (let i = 0; i < nodes.length; i++) {
+    for (let j = i + 1; j < nodes.length; j++) {
+      const ai = nodes[i], aj = nodes[j];
+      let dx = aj.x - ai.x, dy = aj.y - ai.y;
+      let d = Math.hypot(dx, dy) || 0.001;
+      const ux = dx / d, uy = dy / d;
+      const rep = K.repulse / (d * d);           // close-range anti-overlap
+      const ki = idIndex.get(ai.pid), kj = idIndex.get(aj.pid);
+      const s = (ki != null && kj != null) ? (matrix[ki]?.[kj] ?? 0) : 0;
+      // signed spring: w>0 (concordant) pulls together, w<0 (uncorrelated/anti) pushes
+      // apart; tanh saturates so separated clusters stay put and motion stays gentle.
+      const w = Math.max(-0.7, Math.min(1, (s - K.attractThresh) / (1 - K.attractThresh)));
+      const stretch = Math.tanh((d - K.rest) / (K.rest * 2));
+      const f = K.attract * w * stretch - rep;   // + => together, - => apart
+      fx.set(ai, fx.get(ai) + f * ux); fy.set(ai, fy.get(ai) + f * uy);
+      fx.set(aj, fx.get(aj) - f * ux); fy.set(aj, fy.get(aj) - f * uy);
+    }
+  }
+  for (const a of nodes) {
+    let vx = fx.get(a) * K.mobility, vy = fy.get(a) * K.mobility;
+    const sp = Math.hypot(vx, vy);
+    if (sp > K.maxSpeed) { vx = vx / sp * K.maxSpeed; vy = vy / sp * K.maxSpeed; }
+    a.x += vx * dt; a.y += vy * dt;
+    a.x = Math.max(30, Math.min(W - 30, a.x));
+    a.y = Math.max(30, Math.min(H - 30, a.y));
+  }
+  const pos = new Map(nodes.map((a) => [a.pid, a]));
 
-  // Synchrony edges.
+  // ---- Cluster detection (union-find on concordance) + per-group glow ----
+  const clusters = detectClusters(ids, matrix, K.clusterThresh);
+  for (const grp of clusters) {
+    const members = grp.map((id) => pos.get(id)).filter(Boolean);
+    if (members.length < 2) continue;
+    const gx = members.reduce((s, a) => s + a.x, 0) / members.length;
+    const gy = members.reduce((s, a) => s + a.y, 0) / members.length;
+    let R = 0;
+    for (const a of members) R = Math.max(R, Math.hypot(a.x - gx, a.y - gy));
+    R += 46;
+    const alpha = 0.10 + 0.06 * Math.min(members.length, 5);
+    const rgb = avgRgb(members.map((a) => a.color));
+    const glow = ctx.createRadialGradient(gx, gy, 0, gx, gy, R);
+    glow.addColorStop(0, `rgba(${rgb},${alpha})`);
+    glow.addColorStop(1, `rgba(${rgb},0)`);
+    ctx.fillStyle = glow;
+    ctx.beginPath(); ctx.arc(gx, gy, R, 0, 2 * Math.PI); ctx.fill();
+  }
+
+  // Synchrony edges (bright within a matching group).
   for (let i = 0; i < ids.length; i++) {
     for (let j = i + 1; j < ids.length; j++) {
       const s = matrix[i]?.[j] ?? 0;

@@ -201,10 +201,11 @@ class SimulatorSource:
 
         # Shared arousal envelope: when people are coupled, blend a common slow HR
         # swing into everyone so their HR *levels* co-move (not just their beats),
-        # scaled by how strongly they're coupled right now.
+        # scaled by how strongly they're coupled right now. The envelope is offset per
+        # sub-group so distinct cliques co-move *within* but not *across* — otherwise a
+        # single global envelope would correlate every group's HR and merge them.
         self._arousal_phase = (self._arousal_phase + TWO_PI * AROUSAL_HZ * dt) % TWO_PI
         arousal_gain = min(1.0, k / 4.0)
-        shared_arousal = arousal_gain * AROUSAL_AMP * math.sin(self._arousal_phase)
 
         phases = [o.phase for o in self._oscillators]
         groups = [sc.group_of(i) for i in range(n)]
@@ -230,8 +231,10 @@ class SimulatorSource:
             o._drift_phase += TWO_PI * 0.02 * dt
             hr = o.base_hr + o.hr_jitter * math.sin(o._drift_phase)
             hr += groups[i] * sc.group_hr_spread
-            if active[i]:
-                hr += shared_arousal  # coupled people share a slow HR envelope
+            if active[i] and arousal_gain > 0:
+                # per-group phase offset -> each clique shares its own HR envelope
+                gp = self._arousal_phase + TWO_PI * groups[i] / max(1, sc.n_groups)
+                hr += arousal_gain * AROUSAL_AMP * math.sin(gp)
             rsa = 1.0 + o.resp_amp * math.sin(TWO_PI * o.resp_hz * now + o.rsa_phase)
             omega = TWO_PI * (hr / 60.0) * rsa
 
