@@ -61,14 +61,30 @@ function avgRgb(hexes) {
 
 // Force-directed layout constants, scaled to the viewport. Tuned for gentle motion:
 // a hard speed cap (maxSpeed) keeps dots slow; the force ratios set the layout.
+//
+// Spacing is set by a *target distance* per pair that depends on their concordance:
+// highly concordant pairs want to sit close (restMin) and clump, uncorrelated/anti
+// pairs want to be far (restMax). The centering pull is deliberately gentle so this
+// pairwise spacing dominates — otherwise everything collapses toward the middle and
+// non-matching dots never get to spread out.
 function FORCE(ring, n) {
   const scale = ring / 0.3; // ~ min(W,H)
   return {
-    center: 0.9,                     // pull to center (keeps clusters balanced on screen)
+    center: 0.10,                    // gentle centering; pairwise spacing dominates
     repulse: scale * scale * 0.04,   // close-range anti-overlap
-    attract: 55,                     // signed spring magnitude (concordance-weighted)
-    rest: scale * 0.055,             // desired neighbor spacing within a group
-    attractThresh: 0.25,             // concordance at which the spring is neutral
+    attract: 95,                     // pairwise spring magnitude (beats the center pull)
+    rest: scale * 0.055,             // spring width (linear region of the tanh)
+    // Target distance is a continuous function of the smoothed concordance s in
+    // [-1, 1], monotonically increasing as s falls: sync clumps, 0 is distant, and
+    // anti-correlation is more distant still (see the target calc below). Distances are
+    // fractions of min(W,H), sized so the max-distance (anti) case reaches ~85% of the
+    // way to the edge — the constellation uses the screen instead of huddling centrally.
+    restMin: scale * 0.045,          // s >= sHigh : fully-concordant pairs (tight clump)
+    restZero: scale * 0.46,          // s  = 0     : uncorrelated (distant)
+    restMax: scale * 0.86,           // s  = -1    : anti-correlated (most distant)
+    sHigh: 0.55,                     // concordance >= this = full clump
+    varLo: 1.0,                      // HR SD (bpm) below this = flat signal, correlation
+    varHi: 3.0,                      //   is noise -> distrust; full trust at/above varHi.
     clusterThresh: 0.35,             // concordance above this = same group (for glow)
     mobility: 1.0,                   // overdamped: velocity = force * mobility
     maxSpeed: scale * 0.12,          // px/sec hard cap -> never fast
@@ -76,13 +92,15 @@ function FORCE(ring, n) {
 }
 
 // Union-find clustering: group people whose pairwise concordance exceeds a threshold.
-function detectClusters(ids, matrix, thresh) {
+// ``sOf(i, j)`` returns the concordance for a pair (the gated/smoothed value, so the
+// glow matches the layout).
+function detectClusters(ids, sOf, thresh) {
   const n = ids.length;
   const parent = ids.map((_, i) => i);
   const find = (i) => { while (parent[i] !== i) { parent[i] = parent[parent[i]]; i = parent[i]; } return i; };
   for (let i = 0; i < n; i++) {
     for (let j = i + 1; j < n; j++) {
-      if ((matrix[i]?.[j] ?? 0) > thresh) parent[find(i)] = find(j);
+      if (sOf(i, j) > thresh) parent[find(i)] = find(j);
     }
   }
   const groups = new Map();
@@ -104,6 +122,15 @@ addEventListener("keydown", (e) => {
 
 // Local per-person animation state so pulsing is smooth between 10 Hz frames.
 const anim = new Map(); // person_id -> {phase, hr, alpha, x, y, color, name}
+
+// Time-smoothed pairwise concordance driving the layout. The windowed correlation
+// of near-flat signals is very noisy — it swings across ±0.9 with a mean near zero
+// (spurious peaks from correlating sensor noise, amplified by the lag scan). Reacting
+// to each frame would clump *uncorrelated* people on transient spikes; an EMA over
+// CONC_TAU keeps only *sustained* concordance, so independent pairs settle toward
+// their ~0 mean and spread apart while genuine, held synchrony still gathers.
+const concEMA = new Map(); // "pidA|pidB" (sorted) -> smoothed concordance
+const CONC_TAU = 8.0;      // seconds
 
 function resize() {
   const dpr = window.devicePixelRatio || 1;
@@ -223,6 +250,7 @@ function frameTick(nowMs) {
     a.shape = p.shape || "disc";
     a.seat = p.seat || 0;
     a.hr = p.hr ?? a.hr;
+    a.hrVar = typeof p.hr_var === "number" ? p.hr_var : a.hrVar; // for the flat-signal gate
     // Advance local phase by heart rate; nudge toward the server phase (beat pulse).
     a.phase += (a.hr / 60) * 2 * Math.PI * dt;
     if (typeof p.phase === "number") {
@@ -247,6 +275,10 @@ function frameTick(nowMs) {
   // sub-groups each sync internally but not across, they settle into separate clumps.
   const nodes = people.map((p) => anim.get(p.person_id)).filter(Boolean);
   const K = FORCE(ring, nodes.length);
+  // How much to trust a person's correlations: 0 when their HR is flat (SD <= varLo),
+  // ramping to 1 by varHi. Unknown variance (null) is trusted (don't damp on missing data).
+  const varTrust = (a) =>
+    a.hrVar == null ? 1 : Math.max(0, Math.min(1, (a.hrVar - K.varLo) / (K.varHi - K.varLo)));
   const fx = new Map(), fy = new Map();
   for (const a of nodes) { fx.set(a, (cx - a.x) * K.center); fy.set(a, (cy - a.y) * K.center); }
   for (let i = 0; i < nodes.length; i++) {
@@ -257,12 +289,37 @@ function frameTick(nowMs) {
       const ux = dx / d, uy = dy / d;
       const rep = K.repulse / (d * d);           // close-range anti-overlap
       const ki = idIndex.get(ai.pid), kj = idIndex.get(aj.pid);
-      const s = (ki != null && kj != null) ? (matrix[ki]?.[kj] ?? 0) : 0;
-      // signed spring: w>0 (concordant) pulls together, w<0 (uncorrelated/anti) pushes
-      // apart; tanh saturates so separated clusters stay put and motion stays gentle.
-      const w = Math.max(-0.7, Math.min(1, (s - K.attractThresh) / (1 - K.attractThresh)));
-      const stretch = Math.tanh((d - K.rest) / (K.rest * 2));
-      const f = K.attract * w * stretch - rep;   // + => together, - => apart
+      const raw = (ki != null && kj != null) ? (matrix[ki]?.[kj] ?? 0) : 0;
+      // Flat-signal gate: a correlation is only trustworthy if BOTH hearts actually
+      // vary — near-flat HR (SD ~ the sensor noise floor) yields spurious correlations.
+      // Genuine breathing sync raises HR variability (RSA), so it stays trusted while
+      // resting/independent people (low SD) have their concordance damped toward 0.
+      const gated = raw * Math.min(varTrust(ai), varTrust(aj));
+      // EMA-smooth so only sustained sync moves the layout (kills transient spikes).
+      const key = ai.pid < aj.pid ? ai.pid + "|" + aj.pid : aj.pid + "|" + ai.pid;
+      const prev = concEMA.get(key);
+      const s = prev == null ? gated : prev + (gated - prev) * (1 - Math.exp(-dt / CONC_TAU));
+      concEMA.set(key, s);
+      // The smoothed concordance sets the pair's target distance, continuously:
+      //   s >= sHigh -> restMin  (genuine sync: tight clump)
+      //   s  = 0     -> restZero (uncorrelated: distant)
+      //   s  = -1    -> restMax  (anti-correlated: most distant)
+      // so 0 already sits far apart and anti-phase sits farther still, and the gap a
+      // pair holds is a readout of their correlation over the smoothing window. A
+      // spring toward that target pulls matching dots in and pushes the rest out; tanh
+      // keeps the force bounded so motion stays gentle and clusters settle.
+      let target;
+      if (s >= K.sHigh) {
+        target = K.restMin;
+      } else if (s >= 0) {
+        const u = s / K.sHigh;                    // 1 at sHigh -> 0 at s=0
+        target = K.restZero + (K.restMin - K.restZero) * u;
+      } else {
+        const u = Math.min(1, -s);                // 0 at s=0 -> 1 at s=-1
+        target = K.restZero + (K.restMax - K.restZero) * u;
+      }
+      const stretch = Math.tanh((d - target) / (K.rest * 1.2));
+      const f = K.attract * stretch - rep;       // + => together, - => apart
       fx.set(ai, fx.get(ai) + f * ux); fy.set(ai, fy.get(ai) + f * uy);
       fx.set(aj, fx.get(aj) - f * ux); fy.set(aj, fy.get(aj) - f * uy);
     }
@@ -277,8 +334,26 @@ function frameTick(nowMs) {
   }
   const pos = new Map(nodes.map((a) => [a.pid, a]));
 
+  // Prune smoothed-concordance memory for pairs whose people have left (only when it
+  // has grown past the current pair count, so this stays cheap).
+  if (concEMA.size > nodes.length * nodes.length) {
+    const live = new Set(nodes.map((a) => a.pid));
+    for (const k of concEMA.keys()) {
+      const [x, y] = k.split("|");
+      if (!live.has(x) || !live.has(y)) concEMA.delete(k);
+    }
+  }
+
+  // Gated, smoothed concordance for a pair — the same value that drives the spacing,
+  // so the edges and cluster glow below agree with the layout rather than re-reading
+  // the raw noisy matrix (which would draw faint "sync" between people we've spread).
+  const sAt = (i, j) => {
+    const a = ids[i], b = ids[j];
+    return concEMA.get(a < b ? a + "|" + b : b + "|" + a) ?? 0;
+  };
+
   // ---- Cluster detection (union-find on concordance) + per-group glow ----
-  const clusters = detectClusters(ids, matrix, K.clusterThresh);
+  const clusters = detectClusters(ids, sAt, K.clusterThresh);
   for (const grp of clusters) {
     const members = grp.map((id) => pos.get(id)).filter(Boolean);
     if (members.length < 2) continue;
@@ -299,7 +374,7 @@ function frameTick(nowMs) {
   // Synchrony edges (bright within a matching group).
   for (let i = 0; i < ids.length; i++) {
     for (let j = i + 1; j < ids.length; j++) {
-      const s = matrix[i]?.[j] ?? 0;
+      const s = sAt(i, j);
       if (s <= 0.05) continue;
       const ai = pos.get(ids[i]), aj = pos.get(ids[j]);
       if (!ai || !aj) continue;
