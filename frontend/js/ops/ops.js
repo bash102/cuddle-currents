@@ -43,6 +43,16 @@ const el = (id) => document.getElementById(id);
 const peopleNodes = new Map();
 const deviceNodes = new Map();
 
+// Card ordering state: active sessions sort above disconnected ones, and a person who
+// transitions disconnected -> active (a band just came online / was handed to them)
+// jumps to the top. `reconnectSeq` is a monotonic stamp assigned on that transition;
+// higher = more recent = higher in the list. People active since load carry stamp 0.
+let reconnectCounter = 0;
+const reconnectSeq = new Map(); // person_id -> stamp
+const wasActive = new Map(); // person_id -> was non-disconnected last frame
+let peopleOrderSig = "";
+const isActive = (p) => p.connection !== "disconnected";
+
 // Latest roster (all people), so both panels can offer reassignment targets.
 let roster = [];
 const notRetired = (p) => p.enrollment !== "retired";
@@ -129,6 +139,13 @@ function reconcilePeople(people) {
   const seen = new Set();
   for (const p of people) {
     seen.add(p.person_id);
+    const active = isActive(p);
+    if (!reconnectSeq.has(p.person_id)) {
+      reconnectSeq.set(p.person_id, 0); // first sighting: below any future reconnects
+    } else if (active && wasActive.get(p.person_id) === false) {
+      reconnectSeq.set(p.person_id, ++reconnectCounter); // came back -> jump to the top
+    }
+    wasActive.set(p.person_id, active);
     let node = peopleNodes.get(p.person_id);
     if (!node) {
       node = makePersonCard(p);
@@ -137,7 +154,33 @@ function reconcilePeople(people) {
     }
     updatePersonCard(node, p);
   }
-  for (const [id, node] of peopleNodes) if (!seen.has(id)) { node.root.remove(); peopleNodes.delete(id); }
+  for (const [id, node] of peopleNodes) if (!seen.has(id)) {
+    node.root.remove();
+    peopleNodes.delete(id);
+    reconnectSeq.delete(id);
+    wasActive.delete(id);
+  }
+
+  // Order: active sessions first (most-recently-reconnected at the very top), then
+  // disconnected people by seat. Only touch the DOM when the order actually changes,
+  // so an open dropdown mid-interaction isn't yanked around every frame.
+  const ordered = [...people].sort((a, b) => {
+    const aa = isActive(a), ba = isActive(b);
+    if (aa !== ba) return aa ? -1 : 1;
+    if (aa && ba) {
+      const d = (reconnectSeq.get(b.person_id) || 0) - (reconnectSeq.get(a.person_id) || 0);
+      if (d) return d;
+    }
+    return (a.seat || 0) - (b.seat || 0);
+  });
+  const sig = ordered.map((p) => p.person_id).join(",");
+  if (sig !== peopleOrderSig) {
+    peopleOrderSig = sig;
+    for (const p of ordered) {
+      const node = peopleNodes.get(p.person_id);
+      if (node) wrap.appendChild(node.root);
+    }
+  }
 }
 
 function makePersonCard(p) {
@@ -153,6 +196,7 @@ function makePersonCard(p) {
       <span class="grow"></span>
       <select class="reassign" title="hand this band to another person, or release it"></select>
       <button class="baselinebtn">Baseline</button>
+      <button class="removebtn" title="remove this person from the roster">Remove</button>
     </div>
     <div class="metrics">
       <div class="metric"><label>HR</label><span class="hr">—</span></div>
@@ -185,7 +229,23 @@ function makePersonCard(p) {
     basefill: root.querySelector(".basefill"),
     baselinebtn: root.querySelector(".baselinebtn"),
     reassign: root.querySelector(".reassign"),
+    removebtn: root.querySelector(".removebtn"),
   };
+  // Remove a person from the roster (frees their band back to the pool). Two-click
+  // confirm — the first click arms it, a second within 3s commits — so a stray click
+  // can't drop someone mid-session.
+  n.removebtn.addEventListener("click", async () => {
+    if (n.removebtn.classList.contains("confirm")) {
+      await post("/api/retire", { person_id: n.data.person_id });
+    } else {
+      n.removebtn.classList.add("confirm");
+      n.removebtn.textContent = "Confirm?";
+      setTimeout(() => {
+        n.removebtn.classList.remove("confirm");
+        n.removebtn.textContent = "Remove";
+      }, 3000);
+    }
+  });
   n.reassign.addEventListener("change", async () => {
     const v = n.reassign.value;
     n.reassign.value = "__keep__";
