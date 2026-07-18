@@ -82,6 +82,7 @@ while every person's baseline is retained.
 | `drift_into_sync` | Coupling ramps up; the group gradually locks into one pulsing puddle. |
 | `dropout` | A band roams out and rejoins — exercises the connection lifecycle. |
 | `cliques` | Two sub-groups lock internally at different rates — the puddle forms separate clumps. |
+| `anti_phase` | Two groups whose HR envelopes run in anti-phase — cross-group concordance goes strongly negative, so the two clumps are flung to opposite ends (the max-distance case). |
 | `sync_then_break` | The group locks together, holds, then coupling releases and they drift apart. |
 | `contagion` | Sync spreads from a seed outward — members join the locked group one at a time. |
 | `pacer` | An external rhythm (guided co-breathing) everyone couples toward, pulling mixed rates to a common ~63 bpm. |

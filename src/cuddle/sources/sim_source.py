@@ -233,8 +233,10 @@ class SimulatorSource:
             hr += groups[i] * sc.group_hr_spread
             if active[i] and arousal_gain > 0:
                 # per-group phase offset -> each clique shares its own HR envelope
+                # (offset pi for 2 groups => anti-phase); arousal_scale lets a scenario
+                # amplify the envelope so that (anti-)correlation dominates RSA noise.
                 gp = self._arousal_phase + TWO_PI * groups[i] / max(1, sc.n_groups)
-                hr += arousal_gain * AROUSAL_AMP * math.sin(gp)
+                hr += arousal_gain * AROUSAL_AMP * sc.arousal_scale * math.sin(gp)
             rsa = 1.0 + o.resp_amp * math.sin(TWO_PI * o.resp_hz * now + o.rsa_phase)
             omega = TWO_PI * (hr / 60.0) * rsa
 

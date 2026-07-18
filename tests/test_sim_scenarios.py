@@ -44,6 +44,20 @@ def test_cliques_has_subgroups_with_weak_cross_coupling():
     assert s.group_of(0) != s.group_of(1)
 
 
+def test_anti_phase_two_groups_with_amplified_envelope():
+    s = make_scenario("anti_phase")
+    assert s.n_groups == 2
+    assert s.cross_factor == 0.0  # groups do not beat-sync across
+    assert s.arousal_scale > 1.0  # envelope amplified so anti-correlation dominates RSA
+    assert s.group_hr_spread == 0.0  # anti lives in the shared envelope, not the rate
+    assert s.group_of(0) != s.group_of(1)  # interleaved into two groups
+    # coupling ramps up so the shared arousal engages
+    assert s.coupling(s.ramp_start - 1) == 0.0
+    assert s.coupling(s.ramp_end + 1) == pytest.approx(s.k_max)
+    # other scenarios keep the neutral envelope scale (behaviour unchanged)
+    assert make_scenario("drift_into_sync").arousal_scale == 1.0
+
+
 def test_sync_then_break_ramps_up_then_back_to_zero():
     s = make_scenario("sync_then_break")
     assert s.coupling(s.ramp_start - 1) == 0.0

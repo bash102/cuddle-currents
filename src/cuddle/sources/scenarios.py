@@ -43,6 +43,13 @@ class Scenario:
     cross_factor: float = 1.0
     group_hr_spread: float = 0.0
 
+    # Shared-arousal envelope scale: multiplies the common slow HR swing that makes a
+    # group's HR *levels* co-move. >1 makes that envelope dominate per-person
+    # respiration, so within-group concordance is strong and — because groups share the
+    # envelope in anti-phase (offset pi for 2 groups) — cross-group anti-correlation is
+    # clean rather than washed out by RSA noise.
+    arousal_scale: float = 1.0
+
     # Contagion: people activate one at a time (index 0 is the seed); inactive people
     # emit beats but do not couple yet.
     contagion: bool = False
@@ -133,6 +140,24 @@ def make_scenario(name: str, *, n_people: int = 6) -> Scenario:
             group_hr_spread=14.0,  # second clique locks ~14 bpm higher -> stays separate
         )
 
+    if name == "anti_phase":
+        # Two groups whose shared arousal envelopes run in ANTI-phase (the pi offset
+        # that 2 groups already get), amplified so it dominates per-person respiration:
+        # when one group's HR rises the other's falls, so cross-group concordance is
+        # strongly NEGATIVE while within-group stays positive. Coupling locks beats
+        # within a group (cross_factor 0 keeps the groups from beat-syncing); the rate
+        # bands are equal so the anti-correlation lives purely in the shared envelope.
+        return Scenario(
+            name="anti_phase",
+            k_max=6.0,
+            ramp_start=5.0,
+            ramp_end=25.0,
+            n_groups=2,
+            cross_factor=0.0,
+            group_hr_spread=0.0,
+            arousal_scale=2.0,
+        )
+
     if name == "sync_then_break":
         # Lock together, hold, then release coupling so the group drifts apart again.
         return Scenario(
@@ -176,6 +201,7 @@ SCENARIO_NAMES = [
     "drift_into_sync",
     "dropout",
     "cliques",
+    "anti_phase",
     "sync_then_break",
     "contagion",
     "pacer",
