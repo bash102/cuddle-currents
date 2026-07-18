@@ -114,6 +114,15 @@ class EnrollmentManager:
         if prev and prev != person_id:
             self._park(prev)
 
+        # Release the target's own prior band (if different) on BOTH the registry and
+        # the source. Without the source unbind, that old device keeps routing samples
+        # to this person even after their device_id moves to the new band — an orphaned
+        # route that shows up as a person "getting data" while marked disconnected.
+        old = target.profile.device_id
+        if old and old != device_id:
+            self._store.unbind_device(old)
+            self._source.unbind(old)
+
         self._store.bind_device(device_id, person_id)
         self._source.bind(device_id, person_id)
 
@@ -173,7 +182,11 @@ class EnrollmentManager:
         # start() is stamped on the first sample's clock via tick()
 
     def retire(self, person_id: str) -> None:
+        sess = self._store.get(person_id)
+        dev = sess.profile.device_id if sess else None
         self._store.retire(person_id)
+        if dev:
+            self._source.unbind(dev)  # return the band to the pool, stop routing samples
         self._baselines.pop(person_id, None)
         self.save()
 

@@ -115,6 +115,37 @@ def test_retire(tmp_path):
     assert store.get("alice").profile.enrollment_state == EnrollmentState.retired
 
 
+def test_retire_frees_the_band_from_the_source(tmp_path):
+    # Removing a person must return their band to the pool, not leave the source
+    # routing that device's samples to a retired (invisible) person.
+    store, src, mgr = _mgr(tmp_path)
+    mgr.assign("SIM-01", "Alice")
+    assert src.bindings.get("SIM-01") == "alice"
+    mgr.retire("alice")
+    assert "SIM-01" not in src.bindings
+    assert store.person_for_device("SIM-01") is None
+
+
+def test_reassign_to_person_holding_another_band_frees_the_old_band(tmp_path):
+    # The reported bug: handing a band to someone who already holds a different band
+    # must release that other band on BOTH the registry and the source. Otherwise the
+    # old device keeps routing samples to a person whose device_id has moved on — a
+    # person "getting data" while shown disconnected.
+    store, src, mgr = _mgr(tmp_path)
+    mgr.assign("SIM-01", "Alice")
+    _make_calibrated(store, "alice")
+    mgr.assign("SIM-02", "Bob")
+    _make_calibrated(store, "bob")
+
+    # Hand Alice's band (SIM-01) to Bob, who already holds SIM-02.
+    mgr.assign_device("SIM-01", "bob")
+
+    assert store.get("bob").profile.device_id == "SIM-01"
+    # Bob's previous band must be fully freed — no orphaned source route.
+    assert "SIM-02" not in src.bindings, "orphaned source binding still routes SIM-02"
+    assert store.person_for_device("SIM-02") is None
+
+
 def _make_calibrated(store, person_id):
     prof = store.get(person_id).profile
     prof.calibration = Calibration(hr_mean=65.0, hr_std=3.0, resting_hr=65.0, hrv_baseline=40.0)
