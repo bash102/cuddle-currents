@@ -1,0 +1,6 @@
+# Local credentials — never commit
+gateway/secrets.h
+# Build output
+build/
+*.bin
+*.elf
