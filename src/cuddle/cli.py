@@ -39,6 +39,9 @@ def build_engine(args) -> Engine:
             backoff_start=rc["backoff_start"],
             backoff_max=rc["backoff_max"],
             jitter=rc["jitter"],
+            drop_after=rc["drop_after"],
+            evict_after=rc["evict_after"],
+            stale_after_rr_factor=cfg["processing"]["stale_after_rr_factor"],
         )
         source_type = Source.ble
     elif args.source == "replay":

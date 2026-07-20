@@ -52,6 +52,8 @@ _DEFAULTS: dict[str, Any] = {
         "backoff_start": 1.0,
         "backoff_max": 16.0,
         "jitter": 0.3,
+        "drop_after": 20.0,
+        "evict_after": 120.0,
     },
 }
 

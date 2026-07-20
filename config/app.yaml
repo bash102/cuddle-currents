@@ -45,3 +45,7 @@ reconnect:
   backoff_start: 1.0
   backoff_max: 16.0
   jitter: 0.3
+  drop_after: 20.0            # report DISCONNECTED after this much silence/failure,
+                             #   while the retry task keeps trying at backoff_max
+  evict_after: 120.0         # purge an UNBOUND, absent device after this long
+                             #   (bound devices are never evicted)
