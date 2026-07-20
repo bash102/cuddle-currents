@@ -6,6 +6,7 @@ from tools.mock_gateway import (
     build_status_topic,
     online_topic,
     frames_from_capture,
+    status_payload,
 )
 
 
@@ -35,3 +36,8 @@ def test_frames_from_capture_encode_roundtrip(tmp_path):
     assert frames[0][1] == "cuddle/mock/hr/AA:BB"  # default gw id "mock"
     m = parse_hr_measurement(frames[0][2])
     assert m.hr_bpm == 60 and len(m.rr_intervals) == 1
+
+
+def test_status_payload():
+    p = json.loads(status_payload("connected", -50))
+    assert p == {"event": "connected", "rssi": -50}

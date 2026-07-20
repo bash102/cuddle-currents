@@ -30,6 +30,10 @@ def online_topic(prefix: str, gw: str) -> str:
     return f"{prefix}/{gw}/online"
 
 
+def status_payload(event: str, rssi: int | None = None) -> bytes:
+    return json.dumps({"event": event, "rssi": rssi}).encode()
+
+
 def frames_from_capture(
     path: str, *, prefix: str = "cuddle", gw: str = "mock"
 ) -> list[tuple[float, str, bytes]]:
@@ -78,6 +82,41 @@ async def run_replay(path: str, broker: str, port: int, prefix: str, gw: str) ->
         await client.publish(online_topic(prefix, gw), b"0", qos=1, retain=True)
 
 
+async def run_bleak(broker: str, port: int, prefix: str, gw: str) -> None:
+    """Real BLE central: forward raw 0x2A37 notifications to MQTT per the contract.
+
+    Reuses DirectBleSource for scan/connect/backoff; we tap its normalized samples
+    but re-emit the *raw* frame bytes so the app decodes with its own parser. Since
+    DirectBleSource yields decoded NormalizedSample (not raw bytes), we re-encode
+    with encode_hr_measurement — lossless for HR/RR/contact, the fields the app uses.
+    """
+    import aiomqtt
+
+    from cuddle.sources.ble_source import DirectBleSource
+
+    ble = DirectBleSource()
+    will = aiomqtt.Will(online_topic(prefix, gw), b"0", qos=1, retain=True)
+    async with aiomqtt.Client(broker, port, will=will) as client:
+        await client.publish(online_topic(prefix, gw), b"1", qos=1, retain=True)
+        await ble.start()
+        seen: set[str] = set()
+        try:
+            async for s in ble.subscribe():
+                dev = s.device_id
+                if dev not in seen:
+                    seen.add(dev)
+                    await client.publish(
+                        build_status_topic(prefix, gw, dev), status_payload("connected")
+                    )
+                payload = encode_hr_measurement(
+                    s.hr_bpm, rr_intervals=s.rr_intervals, contact=s.contact
+                )
+                await client.publish(build_hr_topic(prefix, gw, dev), payload)
+        finally:
+            await ble.stop()
+            await client.publish(online_topic(prefix, gw), b"0", qos=1, retain=True)
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description="Mock BLE->WiFi gateway (MQTT publisher)")
     ap.add_argument("--mode", choices=["replay", "bleak"], default="replay")
@@ -92,7 +131,7 @@ def main() -> None:
             raise SystemExit("--capture is required for --mode replay")
         asyncio.run(run_replay(args.capture, args.broker, args.port, args.prefix, args.gateway))
     else:
-        raise SystemExit("--mode bleak is implemented in Task 6")
+        asyncio.run(run_bleak(args.broker, args.port, args.prefix, args.gateway))
 
 
 if __name__ == "__main__":
