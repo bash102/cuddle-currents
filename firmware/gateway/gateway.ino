@@ -48,6 +48,14 @@ struct GwEvent {
   int rssi;            // EVT_CONNECTED
 };
 
+// A connect request carries the address string AND its type (public/random). Rebuilding
+// a NimBLEAddress from the string alone defaults to public, so random-address bands
+// (Coospo uses random) fail to connect — we must preserve the advertised type.
+struct ConnectReq {
+  char addr[18];
+  uint8_t type;
+};
+
 static QueueHandle_t evtQueue;      // BLE task -> loop() publishes
 static QueueHandle_t connectQueue;  // scan callback -> loop() connects
 
@@ -113,21 +121,27 @@ class ScanCB : public NimBLEAdvertisedDeviceCallbacks {
     String a = dev->getAddress().toString().c_str();
     if (isHeld(a)) return;                       // already connected/in-flight
     if (heldCount >= MAX_CONNECTIONS) return;    // at capacity
-    char buf[18];
-    strncpy(buf, a.c_str(), sizeof(buf) - 1);
-    buf[17] = 0;
-    xQueueSend(connectQueue, buf, 0);            // let loop() do the connect
+    ConnectReq req{};
+    strncpy(req.addr, a.c_str(), sizeof(req.addr) - 1);
+    req.type = dev->getAddress().getType();      // preserve public/random
+    Serial.printf("BLE: HR band advertised %s (type %d, rssi %d) -> queueing connect\n",
+                  req.addr, req.type, dev->getRSSI());
+    xQueueSend(connectQueue, &req, 0);           // let loop() do the connect
   }
 };
 
 // ---- connection (called from loop(), not from a callback) ------------------
-static void connectTo(const String& addr) {
+static void connectTo(const char* addrStr, uint8_t type) {
+  String addr(addrStr);
   if (isHeld(addr) || heldCount >= MAX_CONNECTIONS) return;
   addHeld(addr);  // reserve the slot up-front so scan doesn't double-queue
 
+  NimBLEDevice::getScan()->stop();  // don't scan while establishing a link
   NimBLEClient* c = NimBLEDevice::createClient();
   c->setClientCallbacks(&clientCB, false);
-  if (!c->connect(NimBLEAddress(std::string(addr.c_str())))) {
+  // Connect with the preserved address type (public vs random) — critical for Coospo.
+  if (!c->connect(NimBLEAddress(std::string(addrStr), type))) {
+    Serial.printf("BLE: connect FAILED %s (type %d)\n", addrStr, type);
     NimBLEDevice::deleteClient(c);
     removeHeld(addr);
     return;
@@ -135,9 +149,11 @@ static void connectTo(const String& addr) {
   NimBLERemoteService* svc = c->getService(HR_SERVICE);
   NimBLERemoteCharacteristic* chr = svc ? svc->getCharacteristic(HR_MEASUREMENT) : nullptr;
   if (!chr || !chr->canNotify() || !chr->subscribe(true, notifyCB)) {
+    Serial.printf("BLE: subscribe FAILED %s\n", addrStr);
     c->disconnect();  // onDisconnect will clean up the slot
     return;
   }
+  Serial.printf("BLE: subscribed to %s\n", addrStr);
   // connected + subscribed; onConnect already emitted the status event.
 }
 
@@ -168,8 +184,11 @@ static void ensureWifi() {
                                                : " FAILED");
 }
 
+static unsigned long lastMqttTry = 0;
 static void ensureMqtt() {
   if (mqtt.connected()) return;
+  if (lastMqttTry != 0 && millis() - lastMqttTry < 2000) return;  // throttle retries
+  lastMqttTry = millis();
   String will = onlineTopic();
   String clientId = String("cuddle-gw-") + GATEWAY_ID;
   Serial.printf("MQTT: connecting to %s:%d ...", MQTT_BROKER, MQTT_PORT);
@@ -210,7 +229,7 @@ void setup() {
   Serial.printf("\nCuddle Currents gateway '%s' (max %d bands)\n", GATEWAY_ID, MAX_CONNECTIONS);
 
   evtQueue = xQueueCreate(64, sizeof(GwEvent));
-  connectQueue = xQueueCreate(16, sizeof(char[18]));
+  connectQueue = xQueueCreate(16, sizeof(ConnectReq));
 
   scanNetworks();
   ensureWifi();
@@ -235,9 +254,9 @@ void loop() {
   mqtt.loop();
 
   // Perform any queued connects (kept out of the scan callback).
-  char addrBuf[18];
-  while (xQueueReceive(connectQueue, addrBuf, 0) == pdTRUE) {
-    connectTo(String(addrBuf));
+  ConnectReq req;
+  while (xQueueReceive(connectQueue, &req, 0) == pdTRUE) {
+    connectTo(req.addr, req.type);
   }
 
   // Drain and publish BLE events.
