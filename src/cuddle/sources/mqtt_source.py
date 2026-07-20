@@ -12,10 +12,13 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import logging
 
 from cuddle.core import clock
 from cuddle.core.models import ConnectionState, DeviceInfo, NormalizedSample, Source
 from cuddle.sources.ble_parser import parse_hr_measurement
+
+logger = logging.getLogger(__name__)
 
 
 class GatewayMqttSource:
@@ -112,6 +115,8 @@ class GatewayMqttSource:
         try:
             data = json.loads(payload)
         except (ValueError, TypeError):
+            return
+        if not isinstance(data, dict):
             return
         now = clock.now()
         self._last_seen[dev] = now
@@ -219,4 +224,5 @@ class GatewayMqttSource:
             except asyncio.CancelledError:
                 raise
             except Exception:
+                logger.debug("mqtt client loop error; retrying", exc_info=True)
                 await asyncio.sleep(1.0)  # broker unreachable; retry

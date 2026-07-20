@@ -125,3 +125,23 @@ def test_reap_removes_evictable_devices(monkeypatch):
     s._handle_message("cuddle/gw1/status/AA:BB", _status("connected"))
     s._reap(t[0] + 130.0)
     assert "AA:BB" not in s._states and "AA:BB" not in s._last_seen
+
+
+def test_publisher_subscriber_seam(monkeypatch):
+    import cuddle.sources.mqtt_source as mqtt_mod
+    from cuddle.sources.ble_parser import encode_hr_measurement
+    from tools.mock_gateway import status_payload
+    t = [1000.0]
+    monkeypatch.setattr(mqtt_mod.clock, "now", lambda: t[0])
+    s = _src()
+    # a status "connected" from the gateway marks the device connected
+    s._handle_message("cuddle/gwA/status/AA:BB", status_payload("connected", -55))
+    from cuddle.core.models import ConnectionState
+    assert s.connection_states["AA:BB"] == ConnectionState.connected
+    # a raw 0x2A37 HR frame (as the mock publishes) decodes into a sample
+    s._handle_message("cuddle/gwA/hr/AA:BB", encode_hr_measurement(72, rr_intervals=[0.85]))
+    sample = s._queue.get_nowait()
+    assert sample.device_id == "AA:BB" and sample.hr_bpm == 72
+    # a non-object JSON status payload must NOT raise (Fix 1)
+    s._handle_message("cuddle/gwA/status/AA:BB", b"null")
+    s._handle_message("cuddle/gwA/status/AA:BB", b"5")
