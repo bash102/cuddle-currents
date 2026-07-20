@@ -13,9 +13,29 @@ without rewriting the processing or the visualization.
 
 ## The science, briefly
 
-Heart-rate synchrony is a measurable marker of real-world social engagement, strongest
-in close proximity and stronger with affiliation (PNAS Nexus 2026; Frontiers in Human
-Neuroscience 2022). We quantify it two ways:
+Heart-rate synchrony is a measurable marker of real-world social engagement: in the wild
+it rises with **physical proximity** (dyads within ~20 m), is stronger between **socially
+familiar** people, and collapses in loud environments (He et al., *Heart rate synchrony
+as a marker of real-world social engagement*, PNAS Nexus 2026,
+[10.1093/pnasnexus/pgag181](https://doi.org/10.1093/pnasnexus/pgag181)). At the group
+level, continuous inter-beat coupling **predicts group cohesion** (Tomashin, Gordon &
+Wallot, *Interpersonal Physiological Synchrony Predicts Group Cohesion*, Front. Hum.
+Neurosci. 2022, [10.3389/fnhum.2022.903407](https://doi.org/10.3389/fnhum.2022.903407)).
+
+**The mechanism.** The interval between heartbeats is continuously regulated by the
+autonomic nervous system, so each person's heart rate is a *fluctuating envelope*, not a
+fixed number. Two people's envelopes come into alignment through two pathways: a
+**stimulus-driven** one — both nervous systems modulated at once by a shared event,
+amplified by co-presence and joint attention — and an **interaction-driven** one —
+reciprocal co-regulation via the exchange of social signals (speech prosody, facial
+expression, gesture). Crucially, synchrony is an alignment of *dynamics*, not of arousal
+*level*: two people can share an elevated heart rate and be completely unsynchronized
+(the PNAS Nexus study found no link between mean HR and synchrony). What matters is
+whether their fluctuations **co-move** — which is why proximity, familiarity, and a quiet
+setting matter (they enable the shared input and social exchange), and why the metrics
+below are deliberately offset-invariant.
+
+We quantify it two ways:
 
 - **Concordance (matrix):** windowed Lin's concordance of smoothed HR between each
   pair. Under the default `zscore` normalization this equals windowed Pearson
@@ -28,6 +48,14 @@ Neuroscience 2022). We quantify it two ways:
 
 Because individual physiology differs (resting HR, HRV, respiration), each person is
 **baselined** at rest and their signal normalized before comparison.
+
+One caveat the visualization respects: `zscore` concordance reads *dynamics*, so when a
+person's HR is essentially **flat** (windowed SD near the sensor noise floor — ~1 bpm at
+calm rest) it correlates noise and is unreliable. The Show puddle therefore **gates
+concordance on HR variability** — a correlation only counts when both hearts actually
+vary — so calm, uninformative signals are not drawn as confidently synced. For flat
+traces, level agreement (`raw` mode, or simply the per-person HR readouts) is what to
+trust.
 
 ## Hardware
 
@@ -72,7 +100,9 @@ identity, and baseline, just without a band — and their freed band returns to 
 **Unassigned devices** list, where an **assign to parked…** menu can hand it to any
 parked person. Reassigning to someone who's already baselined reactivates them
 instantly (no re-baseline). So a handful of bands can rotate through many people
-while every person's baseline is retained.
+while every person's baseline is retained. To drop someone from the roster entirely,
+the **Remove** button on their card (two-click confirm) retires them and returns their
+band to the pool.
 
 ### Simulator scenarios (`--scenario`, sim only, switchable live in Ops)
 
@@ -104,17 +134,22 @@ cuddle --source replay --capture captures/session.jsonl
 The backend serves one WebSocket stream (`/ws`) to two decoupled pages, meant to run
 in parallel on different monitors:
 
-- **`/` Show** — the final visualization: a clean, full-screen "puddle." Each person
-  is a glyph in a gentle **force-directed layout**: pairwise concordance is attraction,
-  so people whose hearts move together **cluster**, and if multiple sub-groups sync
-  separately they settle into **separate clusters**, each with its own soft glow.
-  Uncorrelated people drift apart. Motion is heavily damped and speed-capped, so dots
-  ease into place rather than darting. The beat is an in-place pulse. When someone
-  becomes active (enrolled or handed a band) a brief cue announces their glyph + seat
-  ("Wren · #1 — sapphire circle"). Press **L** to cycle on-dot labels (none → initials
-  → seat number).
-- **`/ops` Ops** — the technical status: per-band connection lifecycle, raw HR/RR
-  trace + signal quality, the abstract per-person signal, and the synchrony heatmap.
+- **`/` Show** — the final visualization: a clean, full-screen "puddle." Each person is
+  a glyph in a gentle **force-directed layout where distance encodes correlation over
+  time**: strongly concordant hearts **clump** (and sub-groups that sync separately
+  settle into **separate clusters**, each with its own soft glow), uncorrelated people
+  sit **far apart**, and anti-correlated pairs are pushed **farthest of all**. Two
+  guards keep it honest — an **EMA** so only *sustained* concordance gathers a cluster
+  (not a one-frame spike), and the **flat-signal gate** above (a correlation counts only
+  when both hearts actually vary). Motion is heavily damped and speed-capped, so dots
+  ease into place rather than darting, and the constellation is sized to use the screen.
+  The beat is an in-place pulse. When someone becomes active (enrolled or handed a band)
+  a brief cue announces their glyph + seat ("Wren · #1 — sapphire circle"). Press **L**
+  to cycle on-dot labels (none → initials → seat number).
+- **`/ops` Ops** — the technical status: per-band connection lifecycle, raw HR/RR trace
+  + signal quality, the abstract per-person signal, and the synchrony heatmap. Cards
+  sort **active sessions above disconnected ones**, and a person who (re)connects jumps
+  to the top; each card has a **Remove** control (see band reuse above).
 
 ## Architecture
 
@@ -136,18 +171,26 @@ drop-and-rejoin preserves history and matrix position.
 ## Development
 
 ```bash
-pytest            # 34 tests: BLE parser, synchrony, baseline, reconnect, enrollment
+pytest            # 56 tests: BLE parser, synchrony, baseline, reconnect, enrollment,
+                  #           sim scenarios, artifact correction
 ```
 
 Key modules:
 
 - `sources/ble_parser.py` — pure `0x2A37` decoder (golden-tested).
-- `sources/sim_source.py` — Kuramoto-coupled cardiac-oscillator simulator + replay.
-- `hub/enrollment.py`, `processing/baseline.py` — enroll → baseline → active flow.
+- `sources/sim_source.py` — Kuramoto-coupled cardiac-oscillator simulator + replay,
+  with a shared-arousal envelope so coupled HR *levels* co-move (and, in `anti_phase`,
+  counter-move) — the signal cross-person concordance actually reads.
+- `hub/enrollment.py` — enroll → baseline → active, plus band reuse (assign / park /
+  reassign / remove); binding stays consistent across the registry and the source so a
+  reassigned or removed band never keeps routing to its old owner.
+- `processing/baseline.py` — the rest-capture calibration that gates a person to active.
 - `processing/artifact.py` — beat-level spike correction (Hampel + Malik floor +
   missed/extra-beat repair) feeding HRV/synchrony; surgical so it doesn't flatten the
   real dynamics the coherence metric reads. Config under `artifact:` in `app.yaml`.
 - `processing/synchrony.py` — concordance + PLV + group cohesion.
+- `frontend/js/show/puddle.js` — the force-directed puddle: concordance→distance
+  mapping, flat-signal gate, and temporal smoothing (tunables at the top of `FORCE`).
 
 ## Roadmap (Phase 2)
 
