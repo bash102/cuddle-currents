@@ -108,7 +108,79 @@ class GatewayMqttSource:
         )
 
     def _handle_status(self, gw: str, dev: str, payload: bytes) -> None:
-        pass  # implemented in Task 3
+        try:
+            data = json.loads(payload)
+        except (ValueError, TypeError):
+            return
+        now = clock.now()
+        self._last_seen[dev] = now
+        if "rssi" in data:
+            self._rssi[dev] = data["rssi"]
+        event = data.get("event")
+        if event == "connected":
+            self._route_device(dev, gw)
+            self._states[dev] = ConnectionState.connected
+        elif event == "disconnected":
+            # honor only from the gateway that currently owns the band (ignore a
+            # stale drop from the old gateway after a handoff)
+            if self._device_gw.get(dev) == gw:
+                self._states[dev] = ConnectionState.disconnected
 
     def _handle_online(self, gw: str, payload: bytes) -> None:
-        pass  # implemented in Task 3
+        if payload in (b"0", b"", b"false"):
+            for dev in list(self._gw_devices.get(gw, ())):
+                if self._device_gw.get(dev) == gw:
+                    self._states[dev] = ConnectionState.disconnected
+
+    # ---- link-state / eviction helpers (pure, testable) -----------------
+
+    def _link_state(self, dev: str, now: float) -> ConnectionState:
+        raw = self._states.get(dev, ConnectionState.disconnected)
+        last = self._last_seen.get(dev)
+        if last is None:
+            return raw
+        silent = now - last
+        if silent > self._drop_after:
+            return ConnectionState.disconnected
+        if raw == ConnectionState.connected:
+            hr = self._last_hr.get(dev)
+            expected = 60.0 / hr if hr else 1.0
+            if silent > self._stale_after_rr_factor * expected:
+                return ConnectionState.stale
+        return raw
+
+    def _evictable(self, now: float) -> list[str]:
+        return [
+            dev
+            for dev in self._states
+            if dev not in self._bindings
+            and self._last_seen.get(dev) is not None
+            and (now - self._last_seen[dev]) > self._evict_after
+        ]
+
+    def _evict(self, dev: str) -> None:
+        for d in (self._states, self._seq, self._last_hr, self._rssi, self._last_seen, self._device_gw):
+            d.pop(dev, None)
+        for s in self._gw_devices.values():
+            s.discard(dev)
+
+    # ---- SampleSource protocol (presence views) -------------------------
+
+    @property
+    def connection_states(self) -> dict[str, ConnectionState]:
+        now = clock.now()
+        return {dev: self._link_state(dev, now) for dev in self._states}
+
+    def unassigned_devices(self) -> list[DeviceInfo]:
+        now = clock.now()
+        return [
+            DeviceInfo(
+                device_id=dev,
+                source=Source.mqtt,
+                hr_bpm=self._last_hr.get(dev),
+                connection=self._link_state(dev, now),
+                rssi=self._rssi.get(dev),
+            )
+            for dev in self._states
+            if dev not in self._bindings
+        ]
