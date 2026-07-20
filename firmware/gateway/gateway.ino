@@ -142,6 +142,18 @@ static void connectTo(const String& addr) {
 }
 
 // ---- WiFi / MQTT -----------------------------------------------------------
+// One-shot diagnostic: list the 2.4 GHz networks the S3 can actually see. If the
+// configured SSID isn't here, it's out of range or 5 GHz (the S3 is 2.4 GHz only).
+static void scanNetworks() {
+  WiFi.mode(WIFI_STA);
+  int n = WiFi.scanNetworks();
+  Serial.printf("WiFi scan: %d network(s) visible (2.4GHz only on ESP32-S3):\n", n);
+  for (int i = 0; i < n; i++) {
+    Serial.printf("  %-32s rssi=%d ch=%d\n", WiFi.SSID(i).c_str(), WiFi.RSSI(i), WiFi.channel(i));
+  }
+  Serial.printf("  (looking for configured SSID: %s)\n", WIFI_SSID);
+}
+
 static void ensureWifi() {
   if (WiFi.status() == WL_CONNECTED) return;
   WiFi.mode(WIFI_STA);
@@ -200,6 +212,7 @@ void setup() {
   evtQueue = xQueueCreate(64, sizeof(GwEvent));
   connectQueue = xQueueCreate(16, sizeof(char[18]));
 
+  scanNetworks();
   ensureWifi();
   mqtt.setServer(MQTT_BROKER, MQTT_PORT);
   mqtt.setBufferSize(256);
