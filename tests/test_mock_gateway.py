@@ -1,11 +1,24 @@
 import json
 
 from cuddle.sources.ble_parser import parse_hr_measurement
-from tools.mock_gateway import build_hr_topic, frames_from_capture
+from tools.mock_gateway import (
+    build_hr_topic,
+    build_status_topic,
+    online_topic,
+    frames_from_capture,
+)
 
 
 def test_topic_builder():
     assert build_hr_topic("cuddle", "gwA", "AA:BB") == "cuddle/gwA/hr/AA:BB"
+
+
+def test_build_status_topic():
+    assert build_status_topic("cuddle", "gwA", "AA:BB") == "cuddle/gwA/status/AA:BB"
+
+
+def test_online_topic():
+    assert online_topic("cuddle", "gwA") == "cuddle/gwA/online"
 
 
 def test_frames_from_capture_encode_roundtrip(tmp_path):
