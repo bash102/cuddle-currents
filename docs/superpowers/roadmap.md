@@ -53,6 +53,19 @@ auth on the broker.
 ### 5. Gateway provisioning / OTA
 Flashing and configuring many gateways; over-the-air firmware updates.
 
+**Runtime Wi-Fi / config provisioning.** Today the firmware bakes Wi-Fi credentials and
+the broker address in at compile time via a gitignored `secrets.h` — fine for one PoC
+gateway, but painful at ~30 and impossible for a non-developer to change. Add an easy way
+to set the wireless settings (and broker/gateway id) on a running device, without
+re-flashing:
+- **Serial config** — a small command interface over USB serial that writes SSID /
+  password / broker / gateway id to NVS (persistent flash), read at boot.
+- **Hosted captive portal** — on first boot (or when it can't join a network) the ESP32
+  starts a SoftAP + web page (e.g. WiFiManager-style) where you pick the SSID and enter
+  the password from a phone/laptop; it stores to NVS and reconnects.
+Either replaces compile-time `secrets.h` as the source of config; keep `secrets.h` as an
+optional dev override. Store secrets in NVS, never in the repo.
+
 ### 6. 30-person scale validation
 The actual target. Validate processing/synchrony throughput, the Show puddle at ~30 dots,
 and MQTT message volume at scale. May surface tuning work in `processing/` and the frontend.
