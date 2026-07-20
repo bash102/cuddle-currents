@@ -51,6 +51,22 @@ def build_engine(args) -> Engine:
             raise SystemExit("--capture PATH is required for --source replay")
         source = ReplaySource(args.capture, loop=not args.no_loop)
         source_type = Source.sim
+    elif args.source == "mqtt":
+        from cuddle.sources.mqtt_source import GatewayMqttSource
+
+        mq = cfg["mqtt"]
+        rc = cfg["reconnect"]
+        broker = args.broker or f"{mq['broker']}:{mq['port']}"
+        host, _, port = broker.partition(":")
+        source = GatewayMqttSource(
+            broker=host,
+            port=int(port or mq["port"]),
+            topic_prefix=mq["topic_prefix"],
+            drop_after=rc["drop_after"],
+            evict_after=rc["evict_after"],
+            stale_after_rr_factor=cfg["processing"]["stale_after_rr_factor"],
+        )
+        source_type = Source.mqtt
     else:  # pragma: no cover
         raise SystemExit(f"unknown source: {args.source}")
 
@@ -64,9 +80,9 @@ def build_engine(args) -> Engine:
     )
 
 
-def main() -> None:
+def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(prog="cuddle", description="Cuddle Currents POC")
-    ap.add_argument("--source", choices=["sim", "ble", "replay"], default="sim")
+    ap.add_argument("--source", choices=["sim", "ble", "replay", "mqtt"], default="sim")
     ap.add_argument("--scenario", default="drift_into_sync",
                     help="sim scenario: independent | drift_into_sync | dropout | "
                          "cliques | sync_then_break | contagion | pacer")
@@ -81,7 +97,12 @@ def main() -> None:
     ap.add_argument("--enrollment", default="config/enrollment.yaml")
     ap.add_argument("--host", default=None)
     ap.add_argument("--port", type=int, default=None)
-    args = ap.parse_args()
+    ap.add_argument("--broker", help="MQTT broker host:port (with --source mqtt)")
+    return ap
+
+
+def main() -> None:
+    args = build_parser().parse_args()
 
     engine = build_engine(args)
     host = args.host or engine.cfg["transport"]["host"]

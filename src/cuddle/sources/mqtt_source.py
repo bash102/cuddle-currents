@@ -10,6 +10,7 @@ NormalizedSample and never learns the origin.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 
 from cuddle.core import clock
@@ -184,3 +185,38 @@ class GatewayMqttSource:
             for dev in self._states
             if dev not in self._bindings
         ]
+
+    # ---- reaper / client loop --------------------------------------------
+
+    def _reap(self, now: float) -> None:
+        for dev in self._evictable(now):
+            self._evict(dev)
+
+    async def start(self) -> None:
+        self._running = True
+        self._task = asyncio.create_task(self._run(), name="mqtt-ingest")
+
+    async def stop(self) -> None:
+        self._running = False
+        if self._task:
+            self._task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._task
+
+    async def _run(self) -> None:
+        import aiomqtt
+
+        sub = f"{self._prefix}/#"
+        while self._running:
+            try:
+                async with aiomqtt.Client(self._broker, self._port) as client:
+                    await client.subscribe(sub)
+                    async for message in client.messages:
+                        if not self._running:
+                            break
+                        self._handle_message(str(message.topic), bytes(message.payload))
+                        self._reap(clock.now())
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                await asyncio.sleep(1.0)  # broker unreachable; retry

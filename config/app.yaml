@@ -49,3 +49,9 @@ reconnect:
                              #   while the retry task keeps trying at backoff_max
   evict_after: 120.0         # purge an UNBOUND, absent device after this long
                              #   (bound devices are never evicted)
+
+mqtt:
+  broker: 127.0.0.1           # mosquitto host
+  port: 1883
+  topic_prefix: cuddle        # topics: cuddle/<gateway>/hr|status/<device>, cuddle/<gateway>/online
+  max_connections: 4          # per-gateway BLE cap; conservative default, validate on hardware

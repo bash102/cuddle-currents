@@ -116,3 +116,12 @@ def test_evictable_only_unbound_and_absent(monkeypatch):
     assert s._evictable(now) == ["AA:BB"]  # bound CC:DD never evictable
     s._evict("AA:BB")
     assert "AA:BB" not in s._states
+
+
+def test_reap_removes_evictable_devices(monkeypatch):
+    t = [1000.0]
+    monkeypatch.setattr(mqtt_mod.clock, "now", lambda: t[0])
+    s = _src()
+    s._handle_message("cuddle/gw1/status/AA:BB", _status("connected"))
+    s._reap(t[0] + 130.0)
+    assert "AA:BB" not in s._states and "AA:BB" not in s._last_seen

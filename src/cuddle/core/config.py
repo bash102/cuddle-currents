@@ -55,6 +55,12 @@ _DEFAULTS: dict[str, Any] = {
         "drop_after": 20.0,
         "evict_after": 120.0,
     },
+    "mqtt": {
+        "broker": "127.0.0.1",
+        "port": 1883,
+        "topic_prefix": "cuddle",
+        "max_connections": 4,  # per-gateway cap (gateway/firmware hint; validated on hardware)
+    },
 }
 
 
