@@ -100,7 +100,10 @@ Coordination levels:
 invisible to the app. Resolved by level B (or more gateways / better coverage). Level B is
 additive — `cmd` and `discovery` topics, no rework of this contract.
 
-**PoC:** level A, one gateway, a few bands. `max_connections` is enforced by the gateway.
+**PoC:** level A, one gateway, a few bands. `max_connections` is enforced by the gateway;
+its default (4) is a conservative starting point **validated empirically** during firmware
+bring-up (build order step 6) — the measured reliable ceiling sets the shipped default and
+informs how many gateways the 30-person deployment needs.
 
 ## 6. `GatewayMqttSource` (Python)
 
@@ -171,6 +174,13 @@ Publishes the exact contract so the app path is validated with no ESP32. Two mod
 3. Mock gateway (replay mode) + CLI `--source mqtt`; validate end-to-end against mosquitto.
 4. Mock gateway (bleak mode) with real bands.
 5. ESP32 firmware to the frozen contract.
+6. **Validate `max_connections`** — stress one ESP32 with an increasing number of bands
+   and measure the reliable ceiling: connection stability over time, `0x2A37` notification
+   throughput, and dropped/missed beats per band under sustained streaming. NimBLE allows
+   up to ~9 concurrent connections, but the reliable number under continuous HR
+   notifications is expected to be lower; set the `max_connections` default from this
+   measurement (and record it in the spec + config). This number gates how many gateways
+   the 30-person deployment needs, so it must be measured, not assumed.
 
 ## 13. Out of scope (this slice)
 
