@@ -83,7 +83,7 @@ function FORCE(ring, n) {
     restZero: scale * 0.46,          // s  = 0     : uncorrelated (distant)
     restMax: scale * 0.86,           // s  = -1    : anti-correlated (most distant)
     sHigh: 0.55,                     // concordance >= this = full clump
-    varLo: 1.0,                      // HR SD (bpm) below this = flat signal, correlation
+    varLo: 0.8,                      // HR SD (bpm) below this = flat signal, correlation
     varHi: 3.0,                      //   is noise -> distrust; full trust at/above varHi.
     clusterThresh: 0.35,             // concordance above this = same group (for glow)
     mobility: 1.0,                   // overdamped: velocity = force * mobility
