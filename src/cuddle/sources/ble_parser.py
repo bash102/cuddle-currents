@@ -78,3 +78,41 @@ def parse_hr_measurement(data: bytes | bytearray) -> HeartRateMeasurement:
         energy_expended=energy,
         flags=flags,
     )
+
+
+def encode_hr_measurement(
+    hr_bpm: int,
+    rr_intervals: list[float] | None = None,
+    contact: bool | None = None,
+    energy_expended: int | None = None,
+) -> bytes:
+    """Build a 0x2A37 Heart Rate Measurement frame (inverse of parse_hr_measurement).
+
+    RR intervals are quantized to the 1/1024 s wire resolution. Used by the mock
+    gateway's replay mode and by tests; the round-trip with parse is golden-tested.
+    """
+    rr_intervals = rr_intervals or []
+    flags = 0
+    hr16 = hr_bpm > 0xFF
+    if hr16:
+        flags |= 0x01
+    if contact is not None:
+        flags |= 0x04  # contact supported
+        if contact:
+            flags |= 0x02  # contact detected
+    if energy_expended is not None:
+        flags |= 0x08
+    if rr_intervals:
+        flags |= 0x10
+
+    out = bytearray([flags])
+    if hr16:
+        out += int(hr_bpm).to_bytes(2, "little")
+    else:
+        out.append(hr_bpm & 0xFF)
+    if energy_expended is not None:
+        out += int(energy_expended).to_bytes(2, "little")
+    for rr in rr_intervals:
+        raw = max(0, min(0xFFFF, round(rr * 1024.0)))
+        out += int(raw).to_bytes(2, "little")
+    return bytes(out)
