@@ -99,9 +99,6 @@ class Engine:
         while self._running:
             now = clock.now()
             self.enrollment.tick(now)
-            # TODO(Task 6): pass orchestrator into build_frame once it accepts
-            # the `orchestrator=` kwarg (build_frame doesn't yet -- adding it
-            # here now would TypeError on every frame tick).
             self.latest = frame_builder.build_frame(
                 self.store,
                 self.source,
@@ -110,6 +107,7 @@ class Engine:
                 now,
                 scenario=self._scenario_name(),
                 source_type=self.source_type,
+                orchestrator=self.orchestrator,
             )
             await self._broadcast(self.latest)
             await asyncio.sleep(period)

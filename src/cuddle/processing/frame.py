@@ -40,6 +40,7 @@ def build_frame(
     *,
     scenario: str | None,
     source_type: Source,
+    orchestrator=None,
 ) -> StateFrame:
     source_states = source.connection_states
     proc = cfg["processing"]
@@ -88,6 +89,9 @@ def build_frame(
     sync = synchrony.compute(store.all(), now, cfg)
     unassigned = source.unassigned_devices()
 
+    gateways = orchestrator.gateway_states() if orchestrator else []
+    unserved_bands = orchestrator.unserved() if orchestrator else []
+
     return StateFrame(
         t=now,
         people=people,
@@ -95,6 +99,8 @@ def build_frame(
         synchrony=SynchronyState(**sync),
         scenario=scenario,
         source=source_type,
+        gateways=gateways,
+        unserved=unserved_bands,
     )
 
 
