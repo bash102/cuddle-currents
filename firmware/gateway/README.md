@@ -57,12 +57,19 @@ without the button, compile with `-DFORCE_PORTAL` to always open the portal.)
 
 ## Build & flash
 
+The board has 16MB flash; we use the `default_8MB` scheme (3MB app + OTA + 1.5MB
+SPIFFS). **`FlashSize=16M` is required** — with the fqbn's 4MB default the `default_8MB`
+partition table exceeds the flash size and the S3 boot-loops (`partition ... exceeds
+flash chip size`).
+
 ```bash
+FQBN="esp32:esp32:esp32s3:FlashSize=16M,PartitionScheme=default_8MB"
+
 # build
-arduino-cli compile --fqbn esp32:esp32:esp32s3 firmware/gateway
+arduino-cli compile --fqbn "$FQBN" firmware/gateway
 
 # flash + watch boot (UART bridge port; adjust to your device)
-arduino-cli upload  --fqbn esp32:esp32:esp32s3 -p /dev/cu.usbserial-A5069RR4 firmware/gateway
+arduino-cli upload  --fqbn "$FQBN" -p /dev/cu.usbserial-A5069RR4 firmware/gateway
 arduino-cli monitor -p /dev/cu.usbserial-A5069RR4 -c baudrate=115200
 ```
 
@@ -76,7 +83,7 @@ attempt more concurrent bands you must raise BOTH the runtime cap and NimBLE's c
 ceiling:
 
 ```bash
-arduino-cli compile --fqbn esp32:esp32:esp32s3 \
+arduino-cli compile --fqbn "$FQBN" \
   --build-property "compiler.cpp.extra_flags=-DMAX_CONNECTIONS=6 -DCONFIG_BT_NIMBLE_MAX_CONNECTIONS=6" \
   firmware/gateway
 ```
