@@ -352,6 +352,24 @@ static void saveConfig() {
   prefs.putString("gwid", g_gwid);
 }
 
+// ---- status LED (onboard RGB, kept intentionally dim) ----------------------
+// One addressable NeoPixel — RGB_BUILTIN is GPIO48 on the generic esp32s3 variant
+// (confirm on your board; clones vary / some have no RGB). Encodes link + mode +
+// load on a single LED, so the states are prioritized (see updateLed() below setup):
+//   yellow = Wi-Fi connecting/reconnecting   orange = Wi-Fi up but MQTT down
+//   green  = online, opportunistic mode      teal   = online, managed mode (blue accent)
+//   (green/teal brighten with the number of connected bands)
+//   blue   = captive portal open (set from provision()'s AP callback)
+// Channels are capped at LED_MAX on purpose — this is a desk indicator, not a beacon.
+static const uint8_t LED_MAX = 24;  // per-channel ceiling; keep it dim
+
+static void setLed(uint8_t r, uint8_t g, uint8_t b) {
+  static uint8_t lr = 1, lg = 1, lb = 1;      // impossible triple => first call always writes
+  if (r == lr && g == lg && b == lb) return;  // only rewrite on change (no flicker / wasted bit-bangs)
+  lr = r; lg = g; lb = b;
+  rgbLedWrite(RGB_BUILTIN, r, g, b);
+}
+
 // Join saved Wi-Fi, or raise a captive portal (SoftAP + web form) to be provisioned
 // from a phone. Hold BOOT (GPIO0) at reset to force the portal and change settings.
 static void provision() {
@@ -363,6 +381,8 @@ static void provision() {
 #endif
 
   WiFiManager wm;
+  // The portal blocks here (no loop() yet), so light the LED blue when the AP opens.
+  wm.setAPCallback([](WiFiManager*) { setLed(0, 0, LED_MAX); });
   char portStr[8];
   snprintf(portStr, sizeof(portStr), "%d", g_port);
   WiFiManagerParameter p_broker("broker", "MQTT broker (host/IP)", g_broker.c_str(), 40);
@@ -550,10 +570,21 @@ static void maybePublishReport() {
   g_lastReportTime = now;
 }
 
+// Derive the status color from current link/mode/load. Called from the top of loop()
+// (which early-returns while Wi-Fi is down), on the main task — never a BLE callback.
+static void updateLed() {
+  if (WiFi.status() != WL_CONNECTED) { setLed(LED_MAX, LED_MAX * 2 / 3, 0); return; }  // yellow
+  if (!mqtt.connected())             { setLed(LED_MAX, LED_MAX / 3, 0); return; }       // orange
+  uint8_t g = 4 + (uint8_t)heldCount * 3;     // dim green idle, brighter with load
+  if (g > LED_MAX) g = LED_MAX;
+  setLed(0, g, effectiveManaged() ? 8 : 0);   // teal accent distinguishes managed mode
+}
+
 // ---- setup / loop ----------------------------------------------------------
 void setup() {
   Serial.begin(115200);
   delay(200);
+  setLed(LED_MAX, LED_MAX * 2 / 3, 0);  // yellow: booting / joining Wi-Fi
   Serial.printf("\nCuddle Currents gateway (max %d bands)\n", MAX_CONNECTIONS);
 
   evtQueue = xQueueCreate(64, sizeof(GwEvent));
@@ -579,6 +610,7 @@ void setup() {
 }
 
 void loop() {
+  updateLed();  // first, so the LED still updates during the Wi-Fi-down early-return below
   if (WiFi.status() != WL_CONNECTED) { WiFi.reconnect(); delay(500); return; }
   ensureMqtt();
   mqtt.loop();
