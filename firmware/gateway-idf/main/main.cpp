@@ -11,6 +11,19 @@
 //   cuddle/<gw>/online        "1"/"0" retained; "0" is the MQTT Last-Will
 // <dev> is the band's BLE address (identity is the band; gateway is routing only).
 //
+// Level B "managed mode" (orchestrator-driven placement, on top of Level A's default
+// opportunistic auto-connect):
+//   cuddle/<gw>/report        retained, on change + ~2s heartbeat:
+//                             {"capacity":int,"mode":"managed"|"opportunistic",
+//                              "connected":[{"dev":str,"rssi":int|null}],
+//                              "seen":[{"dev":str,"rssi":int|null}],"ts":int}
+//   cuddle/<gw>/cmd      <-   {"action":"connect"|"release","dev":str} (not retained)
+//   cuddle/control/mode  <-   "managed"|"opportunistic" (global, retained)
+//   cuddle/control/online <-  "1"/"0" (global, retained; published once by the
+//                             orchestrator, NOT a heartbeat — see effectiveManaged())
+// Boot default is opportunistic; managed only takes effect once control/mode says so,
+// and auto-reverts to opportunistic if the orchestrator goes quiet for ORCH_GRACE_MS.
+//
 // Provisioning (runtime, no re-flash): on boot the gateway joins saved Wi-Fi; if it
 // has none (or BOOT/GPIO0 is held at reset), it starts a SoftAP + captive portal
 // ("Cuddle-Gateway-Setup") where you pick the Wi-Fi and set broker/port/gateway-id
@@ -64,14 +77,15 @@ int g_port;
 String g_gwid;
 
 // ---- cross-task event marshalling ------------------------------------------
-enum EvtKind : uint8_t { EVT_HR = 0, EVT_CONNECTED = 1, EVT_DISCONNECTED = 2 };
+enum EvtKind : uint8_t { EVT_HR = 0, EVT_CONNECTED = 1, EVT_DISCONNECTED = 2, EVT_SEEN = 3 };
 
 struct GwEvent {
   EvtKind kind;
   char addr[18];       // "aa:bb:cc:dd:ee:ff"
   uint8_t len;         // HR payload length (EVT_HR)
   uint8_t data[32];    // raw 0x2A37 bytes (EVT_HR)
-  int rssi;            // EVT_CONNECTED
+  int rssi;            // EVT_CONNECTED, EVT_SEEN
+  uint8_t addrType;    // EVT_SEEN: public/random, preserved for a later connect
 };
 
 // A connect request carries the address string AND its type (public/random). Rebuilding
@@ -85,31 +99,133 @@ struct ConnectReq {
 static QueueHandle_t evtQueue;      // BLE task -> loop() publishes
 static QueueHandle_t connectQueue;  // scan callback -> loop() connects
 
-// Slots of currently-held / in-flight connections, tracked by address string.
-static String heldAddrs[MAX_CONNECTIONS];
+// Slots of currently-held / in-flight connections, tracked by address string
+// (plus last-known RSSI and the NimBLEClient* once connect() succeeds, so
+// `report` and `cmd:release` can look a peer up by address).
+static const int RSSI_UNSET = -32768;  // outside any real RSSI range (~ -100..0 dBm)
+struct HeldConn {
+  String addr;
+  int rssi;
+  NimBLEClient* client;
+};
+static HeldConn held[MAX_CONNECTIONS];
 static int heldCount = 0;
 
 static bool isHeld(const String& a) {
-  for (int i = 0; i < heldCount; i++) if (heldAddrs[i] == a) return true;
+  for (int i = 0; i < heldCount; i++) if (held[i].addr == a) return true;
   return false;
 }
 static void addHeld(const String& a) {
-  if (heldCount < MAX_CONNECTIONS && !isHeld(a)) heldAddrs[heldCount++] = a;
+  if (heldCount < MAX_CONNECTIONS && !isHeld(a)) {
+    held[heldCount].addr = a;
+    held[heldCount].rssi = RSSI_UNSET;
+    held[heldCount].client = nullptr;
+    heldCount++;
+  }
 }
 static void removeHeld(const String& a) {
   for (int i = 0; i < heldCount; i++) {
-    if (heldAddrs[i] == a) {
-      heldAddrs[i] = heldAddrs[--heldCount];
-      heldAddrs[heldCount] = String();
+    if (held[i].addr == a) {
+      held[i] = held[--heldCount];
+      held[heldCount] = HeldConn{String(), RSSI_UNSET, nullptr};
       return;
     }
   }
+}
+static void setHeldClient(const String& a, NimBLEClient* c) {
+  for (int i = 0; i < heldCount; i++) if (held[i].addr == a) { held[i].client = c; return; }
+}
+static void setHeldRssi(const String& a, int rssi) {
+  for (int i = 0; i < heldCount; i++) if (held[i].addr == a) { held[i].rssi = rssi; return; }
+}
+static NimBLEClient* getHeldClient(const String& a) {
+  for (int i = 0; i < heldCount; i++) if (held[i].addr == a) return held[i].client;
+  return nullptr;
+}
+
+// ---- Level B "managed" orchestration ---------------------------------------
+// g_configuredManaged is what cuddle/control/mode last asked for (retained,
+// boot default false = opportunistic = today's behavior). Whether the gateway
+// actually BEHAVES as managed also depends on orchestrator liveness — see
+// effectiveManaged() below.
+static bool g_configuredManaged = false;
+// Orchestrator liveness, tracked by transition (control/online is published
+// once, retained, NOT a heartbeat — see effectiveManaged()).
+static bool g_online = false;
+static unsigned long g_offlineSince = 0;  // set on a true->false transition; 0 = offline since boot
+static const unsigned long ORCH_GRACE_MS = 15000;
+
+// True while the gateway should behave as managed (no auto-connect, cmd-only):
+// configured managed AND (orchestrator currently online OR still within grace
+// of its last offline transition). Once grace elapses with no online signal,
+// this flips to false and the gateway auto-reverts to opportunistic; it snaps
+// back the instant control/online (or control/mode) says otherwise.
+static bool effectiveManaged() {
+  if (!g_configuredManaged) return false;
+  if (g_online) return true;
+  return (millis() - g_offlineSince) < ORCH_GRACE_MS;
+}
+
+// Scan cache: every advertised HR band seen recently, whether or not we're
+// connected to it. Source for `report.seen` (minus currently-held addrs) and
+// for resolving cmd:connect's addr->type lookup (NimBLEAddress needs the
+// advertised type to connect to random addresses, e.g. Coospo bands).
+struct ScanEntry {
+  String addr;
+  uint8_t type;
+  int rssi;
+  unsigned long last_seen;
+};
+static const int SCAN_CACHE_MAX = 24;
+static const unsigned long SEEN_TTL_MS = 10000;
+static ScanEntry scanCache[SCAN_CACHE_MAX];
+static int scanCount = 0;
+
+static int findScanCacheIndex(const String& addr) {
+  for (int i = 0; i < scanCount; i++) if (scanCache[i].addr == addr) return i;
+  return -1;
+}
+static void touchScanCache(const String& addr, uint8_t type, int rssi) {
+  unsigned long now = millis();
+  int idx = findScanCacheIndex(addr);
+  if (idx >= 0) {
+    scanCache[idx].type = type;
+    scanCache[idx].rssi = rssi;
+    scanCache[idx].last_seen = now;
+    return;
+  }
+  if (scanCount < SCAN_CACHE_MAX) {
+    scanCache[scanCount++] = ScanEntry{addr, type, rssi, now};
+  } else {
+    // Cache is full: evict the stalest entry rather than drop the new one.
+    int oldest = 0;
+    for (int i = 1; i < scanCount; i++) {
+      if (scanCache[i].last_seen < scanCache[oldest].last_seen) oldest = i;
+    }
+    scanCache[oldest] = ScanEntry{addr, type, rssi, now};
+  }
+}
+static void pruneScanCache() {
+  unsigned long now = millis();
+  int w = 0;
+  for (int i = 0; i < scanCount; i++) {
+    if (now - scanCache[i].last_seen <= SEEN_TTL_MS) {
+      if (w != i) scanCache[w] = scanCache[i];
+      w++;
+    }
+  }
+  scanCount = w;
 }
 
 // ---- topic helpers ---------------------------------------------------------
 static String hrTopic(const String& dev)     { return "cuddle/" + g_gwid + "/hr/" + dev; }
 static String statusTopic(const String& dev) { return "cuddle/" + g_gwid + "/status/" + dev; }
 static String onlineTopic()                  { return "cuddle/" + g_gwid + "/online"; }
+static String cmdTopic()                     { return "cuddle/" + g_gwid + "/cmd"; }
+static String reportTopic()                  { return "cuddle/" + g_gwid + "/report"; }
+// Orchestrator control topics are global (not gateway-scoped).
+static const char* MODE_TOPIC   = "cuddle/control/mode";
+static const char* ONLINE_TOPIC = "cuddle/control/online";
 
 // ---- BLE callbacks (run in the NimBLE host task) ---------------------------
 static void notifyCB(NimBLERemoteCharacteristic* chr, uint8_t* data, size_t len, bool isNotify) {
@@ -145,13 +261,28 @@ class ScanCB : public NimBLEScanCallbacks {
   void onResult(const NimBLEAdvertisedDevice* dev) override {
     if (!dev->isAdvertisingService(NimBLEUUID(HR_SERVICE))) return;
     String a = dev->getAddress().toString().c_str();
+    uint8_t type = dev->getAddress().getType();  // preserve public/random
+    int rssi = dev->getRSSI();
+
+    // Marshal the sighting to loop() so the scan cache (String/array) is only
+    // ever touched from the task that owns it — same reasoning as the MQTT
+    // marshalling elsewhere in this file: this callback runs in the NimBLE
+    // host task, not loop()'s task.
+    GwEvent e{};
+    e.kind = EVT_SEEN;
+    strncpy(e.addr, a.c_str(), sizeof(e.addr) - 1);
+    e.addrType = type;
+    e.rssi = rssi;
+    xQueueSend(evtQueue, &e, 0);
+
+    if (effectiveManaged()) return;              // managed: cache only, no auto-connect
     if (isHeld(a)) return;                       // already connected/in-flight
     if (heldCount >= MAX_CONNECTIONS) return;    // at capacity
     ConnectReq req{};
     strncpy(req.addr, a.c_str(), sizeof(req.addr) - 1);
-    req.type = dev->getAddress().getType();      // preserve public/random
+    req.type = type;
     Serial.printf("BLE: HR band advertised %s (type %d, rssi %d) -> queueing connect\n",
-                  req.addr, req.type, dev->getRSSI());
+                  req.addr, req.type, rssi);
     xQueueSend(connectQueue, &req, 0);           // let loop() do the connect
   }
 };
@@ -172,6 +303,7 @@ static void connectTo(const char* addrStr, uint8_t type) {
     removeHeld(addr);
     return;
   }
+  setHeldClient(addr, c);  // so cmd:release / report can find this peer by address
   NimBLERemoteService* svc = c->getService(HR_SERVICE);
   NimBLERemoteCharacteristic* chr = svc ? svc->getCharacteristic(HR_MEASUREMENT) : nullptr;
   if (!chr || !chr->canNotify() || !chr->subscribe(true, notifyCB)) {
@@ -181,6 +313,29 @@ static void connectTo(const char* addrStr, uint8_t type) {
   }
   Serial.printf("BLE: subscribed to %s\n", addrStr);
   // connected + subscribed; onConnect already emitted the status event.
+}
+
+// ---- cmd:release ------------------------------------------------------------
+static void releaseDevice(const String& dev) {
+  NimBLEClient* c = getHeldClient(dev);
+  if (!c) {
+    Serial.printf("cmd release: %s not currently held, ignoring\n", dev.c_str());
+    return;
+  }
+  Serial.printf("cmd release: disconnecting %s\n", dev.c_str());
+  c->disconnect();  // onDisconnect (EVT_DISCONNECTED) does the held[] cleanup
+}
+
+// Tiny hand-rolled extractor for {"action":"...","dev":"..."} — matches the
+// rest of this file's approach to JSON (String concatenation, no library).
+static String jsonExtract(const String& json, const String& key) {
+  String pat = "\"" + key + "\":\"";
+  int idx = json.indexOf(pat);
+  if (idx < 0) return String();
+  idx += pat.length();
+  int end = json.indexOf('"', idx);
+  if (end < 0) return String();
+  return json.substring(idx, end);
 }
 
 // ---- config + provisioning -------------------------------------------------
@@ -243,6 +398,51 @@ static void provision() {
 }
 
 // ---- MQTT ------------------------------------------------------------------
+// Handles cmd (connect/release) and the two control topics. Runs from
+// mqtt.loop() on the main task — the same task that owns the MQTT client and
+// calls connectTo() from the connectQueue drain — so it's safe to call
+// connectTo()/PubSubClient directly here (see the file-header note on
+// threading: only BLE callbacks are barred from touching PubSubClient).
+static void mqttCallback(char* topic, uint8_t* payload, unsigned int length) {
+  String t(topic);
+  String p;
+  p.reserve(length);
+  for (unsigned int i = 0; i < length; i++) p += (char)payload[i];
+
+  if (t == cmdTopic()) {
+    String action = jsonExtract(p, "action");
+    String dev = jsonExtract(p, "dev");
+    if (action == "connect") {
+      int idx = findScanCacheIndex(dev);
+      if (idx >= 0) {
+        connectTo(scanCache[idx].addr.c_str(), scanCache[idx].type);
+      } else {
+        Serial.printf("cmd connect: %s not in scan cache, ignoring\n", dev.c_str());
+      }
+    } else if (action == "release") {
+      releaseDevice(dev);
+    } else {
+      Serial.printf("cmd: unknown action '%s'\n", action.c_str());
+    }
+  } else if (t == MODE_TOPIC) {
+    g_configuredManaged = (p == "managed");
+    Serial.printf("control/mode -> %s\n", g_configuredManaged ? "managed" : "opportunistic");
+  } else if (t == ONLINE_TOPIC) {
+    bool nowOnline = (p == "1");
+    if (nowOnline && !g_online) {
+      g_online = true;
+      Serial.println("control/online -> 1 (orchestrator online)");
+    } else if (!nowOnline && g_online) {
+      g_online = false;
+      g_offlineSince = millis();  // transition-based: only (re)start the grace clock here
+      Serial.println("control/online -> 0 (orchestrator offline, grace timer started)");
+    }
+    // Repeats of the current state are a no-op — control/online is published
+    // once, retained, not a heartbeat, so re-arriving "1" (e.g. re-delivered
+    // on our own reconnect) must never reset anything.
+  }
+}
+
 static unsigned long lastMqttTry = 0;
 static void ensureMqtt() {
   if (mqtt.connected()) return;
@@ -254,6 +454,9 @@ static void ensureMqtt() {
   if (mqtt.connect(clientId.c_str(), nullptr, nullptr, will.c_str(), 1, true, "0")) {
     Serial.println(" ok");
     mqtt.publish(will.c_str(), (const uint8_t*)"1", 1, true);  // online, retained
+    mqtt.subscribe(cmdTopic().c_str());
+    mqtt.subscribe(MODE_TOPIC);
+    mqtt.subscribe(ONLINE_TOPIC);
   } else {
     Serial.printf(" failed rc=%d\n", mqtt.state());
   }
@@ -267,6 +470,7 @@ static void publishEvent(const GwEvent& e) {
       mqtt.publish(hrTopic(dev).c_str(), e.data, e.len, false);
       break;
     case EVT_CONNECTED: {
+      setHeldRssi(dev, e.rssi);
       String payload = String("{\"event\":\"connected\",\"rssi\":") + e.rssi + "}";
       mqtt.publish(statusTopic(dev).c_str(), payload.c_str(), false);
       Serial.printf("BLE connected: %s (rssi %d)\n", e.addr, e.rssi);
@@ -277,7 +481,53 @@ static void publishEvent(const GwEvent& e) {
       removeHeld(dev);
       Serial.printf("BLE disconnected: %s\n", e.addr);
       break;
+    case EVT_SEEN:
+      break;  // handled in loop()'s drain, before publishEvent() is called
   }
+}
+
+// ---- report ------------------------------------------------------------
+// Retained cuddle/<gw>/report, published on change plus a ~2s heartbeat (see
+// maybePublishReport). `ts` is excluded from the change comparison — it ticks
+// every call, so comparing the full string (ts included) would defeat "on
+// change" and spam a publish every loop().
+static String g_lastReportBody;
+static unsigned long g_lastReportTime = 0;
+static const unsigned long REPORT_HEARTBEAT_MS = 2000;
+
+static String buildReportBody() {
+  String s = "{\"capacity\":" + String(MAX_CONNECTIONS) +
+             ",\"mode\":\"" + (effectiveManaged() ? "managed" : "opportunistic") + "\"" +
+             ",\"connected\":[";
+  for (int i = 0; i < heldCount; i++) {
+    if (i > 0) s += ",";
+    s += "{\"dev\":\"" + held[i].addr + "\",\"rssi\":";
+    s += (held[i].rssi == RSSI_UNSET ? String("null") : String(held[i].rssi));
+    s += "}";
+  }
+  s += "],\"seen\":[";
+  bool first = true;
+  for (int i = 0; i < scanCount; i++) {
+    if (isHeld(scanCache[i].addr)) continue;  // seen list excludes the currently-connected
+    if (!first) s += ",";
+    first = false;
+    s += "{\"dev\":\"" + scanCache[i].addr + "\",\"rssi\":" + String(scanCache[i].rssi) + "}";
+  }
+  s += "]";
+  return s;
+}
+
+static void maybePublishReport() {
+  if (!mqtt.connected()) return;
+  String body = buildReportBody();
+  unsigned long now = millis();
+  bool changed = (body != g_lastReportBody);
+  bool heartbeatDue = (now - g_lastReportTime >= REPORT_HEARTBEAT_MS);
+  if (!changed && !heartbeatDue) return;
+  String full = body + ",\"ts\":" + String(now) + "}";
+  mqtt.publish(reportTopic().c_str(), full.c_str(), true);  // retained
+  g_lastReportBody = body;
+  g_lastReportTime = now;
 }
 
 // ---- setup / loop ----------------------------------------------------------
@@ -293,7 +543,8 @@ void setup() {
   provision();  // Wi-Fi via saved creds or captive portal; loads broker/gateway config
 
   mqtt.setServer(g_broker.c_str(), g_port);
-  mqtt.setBufferSize(256);
+  mqtt.setCallback(mqttCallback);
+  mqtt.setBufferSize(640);  // report[] can hold several connected+seen entries
   ensureMqtt();
 
   NimBLEDevice::init(g_gwid.c_str());
@@ -318,14 +569,25 @@ void loop() {
     connectTo(req.addr, req.type);
   }
 
-  // Drain and publish BLE events.
+  // Drain and publish BLE events. EVT_SEEN just updates the scan cache and is
+  // handled here, before the mqtt.connected() gate, so the cache stays warm
+  // even while MQTT is down.
   GwEvent e;
   while (xQueueReceive(evtQueue, &e, 0) == pdTRUE) {
+    if (e.kind == EVT_SEEN) {
+      touchScanCache(String(e.addr), e.addrType, e.rssi);
+      continue;
+    }
     if (mqtt.connected()) publishEvent(e);
   }
+  pruneScanCache();
+  maybePublishReport();
 
-  // Keep scanning while we have spare capacity.
-  if (heldCount < MAX_CONNECTIONS && !NimBLEDevice::getScan()->isScanning()) {
+  // Keep scanning while we have spare capacity. In managed mode, scanning
+  // stays on regardless of capacity — it's what keeps report.seen fresh for
+  // the orchestrator, since ScanCB never auto-connects there.
+  bool wantScan = effectiveManaged() || heldCount < MAX_CONNECTIONS;
+  if (wantScan && !NimBLEDevice::getScan()->isScanning()) {
     NimBLEDevice::getScan()->start(0, false);
   }
 
