@@ -28,14 +28,32 @@ arduino-cli core update-index
 arduino-cli core install esp32:esp32
 arduino-cli lib install "NimBLE-Arduino@1.4.3"   # pinned: firmware uses the 1.4 API
 arduino-cli lib install "PubSubClient"
+arduino-cli lib install "WiFiManager"            # captive-portal provisioning
 ```
 
 ## Configure
 
+Wi-Fi is set at **runtime** via the captive portal (below) — no Wi-Fi password in the
+repo. `secrets.h` only holds the compile-time **defaults** for the MQTT broker and
+gateway id (seeded into NVS on first boot, overridable from the portal):
+
 ```bash
 cp firmware/gateway/secrets.h.example firmware/gateway/secrets.h
-# edit secrets.h — Wi-Fi SSID/password, broker IP, gateway id (secrets.h is gitignored)
+# edit secrets.h — MQTT_BROKER, MQTT_PORT, GATEWAY_ID (secrets.h is gitignored)
 ```
+
+## Provisioning (runtime, no re-flash)
+
+On boot the gateway joins its saved Wi-Fi. If it has none — or you **hold the BOOT
+button (GPIO0) while pressing reset** — it raises a captive portal:
+
+1. On your phone, join the open Wi-Fi **`Cuddle-Gateway-Setup`**.
+2. The config page opens automatically (or visit `http://192.168.4.1`).
+3. Pick your Wi-Fi network + password, and set the **MQTT broker / port / gateway id**.
+4. Save — the gateway stores it to NVS and reconnects. Settings persist across reboots.
+
+To change settings later, hold BOOT at reset to reopen the portal. (For bench testing
+without the button, compile with `-DFORCE_PORTAL` to always open the portal.)
 
 ## Build & flash
 

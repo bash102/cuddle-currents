@@ -11,15 +11,20 @@
 //   cuddle/<gw>/online        "1"/"0" retained; "0" is the MQTT Last-Will
 // <dev> is the band's BLE address (identity is the band; gateway is routing only).
 //
+// Provisioning (runtime, no re-flash): on boot the gateway joins saved Wi-Fi; if it
+// has none (or BOOT/GPIO0 is held at reset), it starts a SoftAP + captive portal
+// ("Cuddle-Gateway-Setup") where you pick the Wi-Fi and set broker/port/gateway-id
+// from a phone. Config persists in NVS. secrets.h only seeds the compile-time
+// DEFAULTS for broker/port/gateway-id.
+//
 // Concurrency: NimBLE callbacks run in the BLE host task, but PubSubClient is not
 // thread-safe. Callbacks only enqueue events onto a FreeRTOS queue; loop() is the
 // sole MQTT publisher.
-//
-// Config (WiFi creds, broker, gateway id) lives in secrets.h — copy secrets.h.example
-// to secrets.h and fill it in. secrets.h is gitignored; never commit credentials.
 
 #include <Arduino.h>
 #include <WiFi.h>
+#include <WiFiManager.h>
+#include <Preferences.h>
 #include <PubSubClient.h>
 #include <NimBLEDevice.h>
 #include "secrets.h"
@@ -31,11 +36,19 @@
 #define MAX_CONNECTIONS 3
 #endif
 
+#define BOOT_BUTTON 0  // GPIO0: hold at reset to force the config portal
+
 static const uint16_t HR_SERVICE = 0x180D;
 static const uint16_t HR_MEASUREMENT = 0x2A37;
 
 WiFiClient wifiClient;
 PubSubClient mqtt(wifiClient);
+Preferences prefs;
+
+// Runtime config (loaded from NVS, defaults from secrets.h, overridable via the portal).
+String g_broker;
+int g_port;
+String g_gwid;
 
 // ---- cross-task event marshalling ------------------------------------------
 enum EvtKind : uint8_t { EVT_HR = 0, EVT_CONNECTED = 1, EVT_DISCONNECTED = 2 };
@@ -81,9 +94,9 @@ static void removeHeld(const String& a) {
 }
 
 // ---- topic helpers ---------------------------------------------------------
-static String hrTopic(const String& dev)     { return String("cuddle/") + GATEWAY_ID + "/hr/" + dev; }
-static String statusTopic(const String& dev) { return String("cuddle/") + GATEWAY_ID + "/status/" + dev; }
-static String onlineTopic()                  { return String("cuddle/") + GATEWAY_ID + "/online"; }
+static String hrTopic(const String& dev)     { return "cuddle/" + g_gwid + "/hr/" + dev; }
+static String statusTopic(const String& dev) { return "cuddle/" + g_gwid + "/status/" + dev; }
+static String onlineTopic()                  { return "cuddle/" + g_gwid + "/online"; }
 
 // ---- BLE callbacks (run in the NimBLE host task) ---------------------------
 static void notifyCB(NimBLERemoteCharacteristic* chr, uint8_t* data, size_t len, bool isNotify) {
@@ -157,42 +170,74 @@ static void connectTo(const char* addrStr, uint8_t type) {
   // connected + subscribed; onConnect already emitted the status event.
 }
 
-// ---- WiFi / MQTT -----------------------------------------------------------
-// One-shot diagnostic: list the 2.4 GHz networks the S3 can actually see. If the
-// configured SSID isn't here, it's out of range or 5 GHz (the S3 is 2.4 GHz only).
-static void scanNetworks() {
-  WiFi.mode(WIFI_STA);
-  int n = WiFi.scanNetworks();
-  Serial.printf("WiFi scan: %d network(s) visible (2.4GHz only on ESP32-S3):\n", n);
-  for (int i = 0; i < n; i++) {
-    Serial.printf("  %-32s rssi=%d ch=%d\n", WiFi.SSID(i).c_str(), WiFi.RSSI(i), WiFi.channel(i));
-  }
-  Serial.printf("  (looking for configured SSID: %s)\n", WIFI_SSID);
+// ---- config + provisioning -------------------------------------------------
+static void loadConfig() {
+  prefs.begin("gwcfg", false);
+  g_broker = prefs.getString("broker", MQTT_BROKER);
+  g_port   = prefs.getInt("port", MQTT_PORT);
+  g_gwid   = prefs.getString("gwid", GATEWAY_ID);
 }
 
-static void ensureWifi() {
-  if (WiFi.status() == WL_CONNECTED) return;
-  WiFi.mode(WIFI_STA);
-  WiFi.begin(WIFI_SSID, WIFI_PASS);
-  Serial.printf("WiFi: connecting to %s", WIFI_SSID);
-  uint32_t start = millis();
-  while (WiFi.status() != WL_CONNECTED && millis() - start < 20000) {
-    delay(250);
-    Serial.print(".");
-  }
-  Serial.println(WiFi.status() == WL_CONNECTED ? String(" ok ") + WiFi.localIP().toString()
-                                               : " FAILED");
+static void saveConfig() {
+  prefs.putString("broker", g_broker);
+  prefs.putInt("port", g_port);
+  prefs.putString("gwid", g_gwid);
 }
 
+// Join saved Wi-Fi, or raise a captive portal (SoftAP + web form) to be provisioned
+// from a phone. Hold BOOT (GPIO0) at reset to force the portal and change settings.
+static void provision() {
+  pinMode(BOOT_BUTTON, INPUT_PULLUP);
+#ifdef FORCE_PORTAL
+  bool forcePortal = true;  // build-time override for testing the portal without the button
+#else
+  bool forcePortal = (digitalRead(BOOT_BUTTON) == LOW);
+#endif
+
+  WiFiManager wm;
+  char portStr[8];
+  snprintf(portStr, sizeof(portStr), "%d", g_port);
+  WiFiManagerParameter p_broker("broker", "MQTT broker (host/IP)", g_broker.c_str(), 40);
+  WiFiManagerParameter p_port("port", "MQTT port", portStr, 6);
+  WiFiManagerParameter p_gwid("gwid", "Gateway ID", g_gwid.c_str(), 24);
+  wm.addParameter(&p_broker);
+  wm.addParameter(&p_port);
+  wm.addParameter(&p_gwid);
+  wm.setConfigPortalTimeout(180);  // seconds to wait in the portal before giving up
+
+  bool ok;
+  if (forcePortal) {
+    Serial.println("BOOT held -> opening config portal 'Cuddle-Gateway-Setup'");
+    ok = wm.startConfigPortal("Cuddle-Gateway-Setup");
+  } else {
+    Serial.println("Wi-Fi: joining saved network (portal 'Cuddle-Gateway-Setup' if none)...");
+    ok = wm.autoConnect("Cuddle-Gateway-Setup");
+  }
+  if (!ok) {
+    Serial.println("provisioning timed out, not connected — restarting");
+    delay(1000);
+    ESP.restart();
+  }
+
+  // Persist any values entered in the portal (unchanged fields keep their defaults).
+  g_broker = p_broker.getValue();
+  g_port   = atoi(p_port.getValue());
+  g_gwid   = p_gwid.getValue();
+  saveConfig();
+  WiFi.setAutoReconnect(true);
+  Serial.printf("Wi-Fi ok %s | broker %s:%d | gateway %s\n",
+                WiFi.localIP().toString().c_str(), g_broker.c_str(), g_port, g_gwid.c_str());
+}
+
+// ---- MQTT ------------------------------------------------------------------
 static unsigned long lastMqttTry = 0;
 static void ensureMqtt() {
   if (mqtt.connected()) return;
   if (lastMqttTry != 0 && millis() - lastMqttTry < 2000) return;  // throttle retries
   lastMqttTry = millis();
   String will = onlineTopic();
-  String clientId = String("cuddle-gw-") + GATEWAY_ID;
-  Serial.printf("MQTT: connecting to %s:%d ...", MQTT_BROKER, MQTT_PORT);
-  // connect with Last-Will "0" (retained) so a hard drop marks this gateway offline.
+  String clientId = "cuddle-gw-" + g_gwid;
+  Serial.printf("MQTT: connecting to %s:%d ...", g_broker.c_str(), g_port);
   if (mqtt.connect(clientId.c_str(), nullptr, nullptr, will.c_str(), 1, true, "0")) {
     Serial.println(" ok");
     mqtt.publish(will.c_str(), (const uint8_t*)"1", 1, true);  // online, retained
@@ -226,18 +271,19 @@ static void publishEvent(const GwEvent& e) {
 void setup() {
   Serial.begin(115200);
   delay(200);
-  Serial.printf("\nCuddle Currents gateway '%s' (max %d bands)\n", GATEWAY_ID, MAX_CONNECTIONS);
+  Serial.printf("\nCuddle Currents gateway (max %d bands)\n", MAX_CONNECTIONS);
 
   evtQueue = xQueueCreate(64, sizeof(GwEvent));
   connectQueue = xQueueCreate(16, sizeof(ConnectReq));
 
-  scanNetworks();
-  ensureWifi();
-  mqtt.setServer(MQTT_BROKER, MQTT_PORT);
+  loadConfig();
+  provision();  // Wi-Fi via saved creds or captive portal; loads broker/gateway config
+
+  mqtt.setServer(g_broker.c_str(), g_port);
   mqtt.setBufferSize(256);
   ensureMqtt();
 
-  NimBLEDevice::init(GATEWAY_ID);
+  NimBLEDevice::init(g_gwid.c_str());
   NimBLEDevice::setPower(ESP_PWR_LVL_P9);
   NimBLEScan* scan = NimBLEDevice::getScan();
   scan->setAdvertisedDeviceCallbacks(new ScanCB(), /*wantDuplicates=*/false);
@@ -249,7 +295,7 @@ void setup() {
 }
 
 void loop() {
-  ensureWifi();
+  if (WiFi.status() != WL_CONNECTED) { WiFi.reconnect(); delay(500); return; }
   ensureMqtt();
   mqtt.loop();
 
