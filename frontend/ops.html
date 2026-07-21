@@ -67,6 +67,44 @@
       #heatmap { width: 100%; height: 280px; background: var(--field); border-radius: 10px; }
       .empty { color: var(--faint); font-size: 13px; }
       .hint { color: var(--faint); font-size: 11px; margin-top: 6px; }
+
+      /* -- Gateways panel (Level B orchestration; hidden when frame.gateways is empty) -- */
+      .gatewaysPanel { padding: 0 14px 14px; }
+      .panelhead { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+      .panelhead h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 0; }
+      .modetoggle { text-transform: capitalize; }
+      .unserved {
+        background: var(--panel-2); border: 1px solid var(--bad); border-radius: 10px;
+        padding: 8px 12px; margin-bottom: 12px;
+      }
+      .unservedhead { color: var(--bad); font-weight: 600; font-size: 12px; margin-bottom: 6px; }
+      .unservedrow { display: flex; gap: 10px; font-size: 12px; padding: 3px 0; }
+      .unservedreason { color: var(--warn); margin-left: auto; }
+      .gatewaycards { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; }
+      .gwcard .dot {
+        display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+        background: var(--bad); flex: none;
+      }
+      .gwcard .gwid { font-weight: 600; }
+      .badge {
+        font-size: 10px; text-transform: uppercase; letter-spacing: .04em;
+        color: var(--muted); border: 1px solid var(--border); border-radius: 999px;
+        padding: 1px 7px;
+      }
+      .badge.managed { color: var(--accent-2); border-color: var(--accent-2); }
+      .gwcap { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+      .gwsection { margin-top: 8px; }
+      .gwlabel { font-size: 10px; text-transform: uppercase; letter-spacing: .06em; color: var(--faint); margin-bottom: 4px; }
+      .gwempty { color: var(--faint); font-size: 11px; }
+      .bandrow { display: flex; align-items: center; gap: 8px; padding: 3px 0; font-size: 12px; }
+      .banddev { word-break: break-all; }
+      .bandrssi { color: var(--muted); font-variant-numeric: tabular-nums; flex: none; }
+      .pinbtn { font-size: 11px; padding: 2px 8px; }
+      .pinbtn.active { background: var(--accent); color: #2a0f12; }
+      .releasebtn { font-size: 11px; padding: 2px 8px; color: var(--bad); border-color: var(--bad); }
+      .releasebtn:hover { background: var(--bad); color: #2a0f12; }
+      .releasebtn.confirm { background: var(--bad); color: #2a0f12; }
+      .connectsel { font-size: 11px; padding: 2px 5px; color: var(--muted); max-width: 160px; }
     </style>
   </head>
   <body>
@@ -120,6 +158,21 @@
         <div class="hint">Warm = in-phase, blue = anti-phase. Diagonal is self.</div>
       </div>
     </div>
+
+    <section id="gatewaysPanel" class="gatewaysPanel" style="display: none">
+      <div class="panelhead">
+        <h2>Gateways</h2>
+        <span class="grow"></span>
+        <span class="kv">orchestrator mode
+          <button id="orchModeToggle" class="modetoggle" title="toggle managed / opportunistic for all gateways">—</button>
+        </span>
+      </div>
+      <div id="unservedCallout" class="unserved" style="display: none">
+        <div class="unservedhead">⚠ Unserved bands</div>
+        <div id="unservedList"></div>
+      </div>
+      <div id="gatewayCards" class="gatewaycards"></div>
+    </section>
 
     <script type="module">
       import { connect } from "./js/ws.js";
