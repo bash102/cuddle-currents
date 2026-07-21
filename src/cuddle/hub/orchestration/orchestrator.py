@@ -131,7 +131,16 @@ class Orchestrator:
             return
         if not isinstance(data, dict):
             return
-        self._world.apply_report(gw, data, now)
+        try:
+            self._world.apply_report(gw, data, now)
+        except (KeyError, ValueError, TypeError):
+            # Well-formed JSON but missing/invalid fields (e.g. no "seen").
+            # world.apply_report stays strict -- guard here at the handler
+            # boundary so a malformed retained payload can't crash this
+            # loop and drive the client into a reconnect/redeliver churn
+            # loop over the same bad message.
+            logger.debug("orchestrator: malformed report from %s; skipping", gw, exc_info=True)
+            return
         self._dirty_event.set()
 
     def _handle_online(self, gw: str, payload: bytes, now: float) -> None:
@@ -242,6 +251,12 @@ class Orchestrator:
         if gw is None:
             return
         self._pending.pop(dev, None)
+        # Clear the manual override pin from force_connect -- otherwise the
+        # band, still pinned + still advertising after it disconnects, gets
+        # immediately re-placed by _run_plan on the next tick, making manual
+        # "Release" a no-op. Enrollment-derived pins (_pinned()) are separate
+        # and untouched here -- an actively-enrolled band stays protected.
+        self._manual_pins.discard(dev)
         self._publish(
             f"{self._prefix}/{gw}/cmd",
             json.dumps({"action": "release", "dev": dev}).encode(),

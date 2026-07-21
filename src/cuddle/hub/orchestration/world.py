@@ -109,8 +109,17 @@ class WorldModel:
         Devs currently in `connected_devs()` are frozen and never pruned,
         however stale their entries: a connected band stops advertising, so
         it has no way to refresh its coverage memory via `seen` while
-        connected. Dropping it would erase the only record of its alternate
-        gateways, making it impossible to rebalance later.
+        connected.
+
+        Note: this freeze does NOT currently make old coverage usable for a
+        later rebalance -- `_find_rebalance_target` (plan.py) independently
+        rejects any entry with `now - ts > coverage_ttl`, and a frozen
+        entry's `ts` never advances while connected, so once it would have
+        aged out here it's also too old to serve as a rebalance target. The
+        freeze is presently functionally inert; it only decouples pruning
+        from that age gate so a future change (e.g. reusing frozen entries
+        for something other than `_find_rebalance_target`) has "not deleted"
+        as a distinct state from "not usable."
         """
         connected = self.connected_devs()
         stale_devs: list[str] = []

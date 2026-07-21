@@ -68,6 +68,7 @@ _DEFAULTS: dict[str, Any] = {
         "pending_ttl": 8.0,
         "coverage_ttl": 60.0,
         "rebalance_cooldown": 10.0,
+        "evict_cooldown": 10.0,
     },
 }
 

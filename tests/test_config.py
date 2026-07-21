@@ -10,6 +10,7 @@ def test_orchestrator_defaults_present_without_app_yaml(tmp_path):
     assert cfg["orchestrator"]["pending_ttl"] == 8.0
     assert cfg["orchestrator"]["coverage_ttl"] == 60.0
     assert cfg["orchestrator"]["rebalance_cooldown"] == 10.0
+    assert cfg["orchestrator"]["evict_cooldown"] == 10.0
 
 
 def test_orchestrator_defaults_from_real_app_yaml():
@@ -20,3 +21,4 @@ def test_orchestrator_defaults_from_real_app_yaml():
     assert cfg["orchestrator"]["pending_ttl"] == 8.0
     assert cfg["orchestrator"]["coverage_ttl"] == 60.0
     assert cfg["orchestrator"]["rebalance_cooldown"] == 10.0
+    assert cfg["orchestrator"]["evict_cooldown"] == 10.0

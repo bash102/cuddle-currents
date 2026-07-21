@@ -93,6 +93,20 @@ def test_handle_report_ignores_malformed_json():
     assert orch._world.gateways == {}
 
 
+def test_handle_report_ignores_well_formed_json_missing_required_field():
+    # Well-formed JSON but missing "seen" (a KeyError inside
+    # world.apply_report) must not raise or corrupt the world -- the report
+    # is retained, so a crash here would put the client loop into a
+    # reconnect/redeliver churn loop over the same bad payload forever.
+    orch = _orch()
+    bad = json.dumps({"capacity": 4, "mode": "managed", "connected": []}).encode()
+
+    orch._handle_report("gw1", bad, now=100.0)
+
+    assert orch._world.gateways == {}
+    assert not orch._dirty_event.is_set()
+
+
 def test_gateway_states_maps_connected_dev_to_person():
     store = SessionStore()
     _person(store, "alice", "AA:01", EnrollmentState.active)
@@ -360,6 +374,49 @@ def test_force_release_noop_when_dev_not_connected_anywhere():
     assert orch._publish.calls == []
 
 
+def test_force_release_clears_manual_pin_so_it_loses_priority_to_a_real_pin():
+    # force_connect pins bandA; force_release must clear that manual pin, or
+    # the still-advertising band -- now unpinned in every way that matters --
+    # would keep first claim on gw1's single free slot on the very next
+    # _run_plan, ahead of bandC which is genuinely (enrollment) pinned. If
+    # the manual pin were not cleared, bandA would win the slot instead of
+    # bandC below (manual "Release" would be a no-op).
+    store = SessionStore()
+    _person(store, "p_c", "bandC", EnrollmentState.active)
+    orch = _orch(store=store)
+    orch._handle_report(
+        "gw1",
+        json.dumps(_payload(capacity=1, connected=[{"dev": "bandA", "rssi": -50}])).encode(),
+        now=100.0,
+    )
+    orch.force_connect("bandA", "gw1")
+    assert "bandA" in orch._manual_pins
+
+    orch.force_release("bandA")
+    assert "bandA" not in orch._manual_pins
+    assert "bandA" not in (orch._pinned() | orch._manual_pins)
+
+    # gw1's next report confirms the release: bandA is no longer connected
+    # and is seen advertising again, alongside bandC (the genuinely pinned dev).
+    orch._handle_report(
+        "gw1",
+        json.dumps(
+            _payload(
+                capacity=1,
+                connected=[],
+                seen=[{"dev": "bandA", "rssi": -50}, {"dev": "bandC", "rssi": -50}],
+            )
+        ).encode(),
+        now=101.0,
+    )
+    orch._publish.calls.clear()
+
+    cmds = orch._run_plan(101.0, allow_rebalance=False)
+
+    assert cmds == [Cmd(gw="gw1", action="connect", dev="bandC")]
+    assert all(c.dev != "bandA" for c in cmds)
+
+
 # ---- set_pin / set_mode -----------------------------------------------------
 
 
@@ -519,6 +576,17 @@ def test_orchestrator_timing_kwargs_pulled_from_config_when_present():
     assert engine.orchestrator._reconcile_interval == 9.0
     # untouched timing keys keep the Orchestrator's own defaults
     assert engine.orchestrator._pending_ttl == 8.0
+
+
+def test_orchestrator_evict_cooldown_pulled_from_config_for_parity_with_rebalance_cooldown():
+    engine = _engine(
+        orchestrate=True,
+        config={
+            "mqtt": {"broker": "127.0.0.1", "port": 1883, "topic_prefix": "cuddle"},
+            "orchestrator": {"evict_cooldown": 3.0},
+        },
+    )
+    assert engine.orchestrator._evict_cooldown == 3.0
 
 
 def test_orchestrator_builds_with_missing_orchestrator_config_section():

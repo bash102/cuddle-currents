@@ -93,8 +93,9 @@ def plan(
     now: float,
     *,
     allow_rebalance: bool,
-    evicted: dict[str, set[str]] = {},
+    evicted: dict[str, set[str]] | None = None,
 ) -> tuple[list[Cmd], list[dict], list[tuple[str, str]]]:
+    evicted = evicted or {}
     connected = world.connected_devs()
     adv = world.advertising()
 
