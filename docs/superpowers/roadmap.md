@@ -33,9 +33,9 @@ Run 2+ gateways with overlapping coverage. Verify in practice: band **handoff/ro
 across gateways (identity is the band, so `person_id` continuity should hold), and that
 opportunistic capacity self-balances.
 
-### 3. Level B — app-orchestrated assignment  *(own spec; the big one for 30-person scale)*
+### 3. Level B — app-orchestrated assignment  *(in progress — [`specs/2026-07-20-level-b-orchestration-design.md`](specs/2026-07-20-level-b-orchestration-design.md))*
 The PoC ships level A (opportunistic + per-gateway cap). Level B gives the app a global view
-and control:
+and control (full app authority, stability-first placement, auto-revert on orchestrator death):
 - **`discovery` topic** — gateways report *seen-but-unconnected* bands so the app knows what
   is available network-wide (not just what's already connected).
 - **`cmd` topic** — app assigns bands to specific gateways; firmware obeys.
