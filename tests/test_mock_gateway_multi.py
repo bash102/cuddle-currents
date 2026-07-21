@@ -229,6 +229,35 @@ def test_opportunistic_commanded_mode_ignores_online_state():
     assert world.effective_mode(now=1.0) == "opportunistic"
 
 
+def test_garbage_payload_is_not_treated_as_online():
+    """Garbage/unknown control/online payload must NOT be treated as online."""
+    world = _world(grace=15.0)
+    world.on_control_mode(b"managed")
+    world.on_control_online(b"garbage", now=0.0)
+
+    # Garbage payload is not b"1", so it's treated as offline. No online message
+    # ever received, so managed mode should never activate.
+    assert world.effective_mode(now=1.0) == "opportunistic"
+    assert world.effective_mode(now=10.0) == "opportunistic"
+
+
+def test_repeated_offline_payloads_do_not_re_stamp_offline_since():
+    """Repeated offline payloads must not re-stamp _offline_since."""
+    world = _world(grace=15.0)
+    world.on_control_mode(b"managed")
+    world.on_control_online(b"1", now=0.0)
+    # Transition offline at t=5
+    world.on_control_online(b"0", now=5.0)
+    # Send repeated offline at t=10 and t=14
+    world.on_control_online(b"0", now=10.0)
+    world.on_control_online(b"0", now=14.0)
+
+    # Grace expires at 5+15=20. Just before that, should still be managed.
+    assert world.effective_mode(now=19.9) == "managed"
+    # At or after grace expires, should revert.
+    assert world.effective_mode(now=20.0) == "opportunistic"
+
+
 def test_default_grace_constant_used_when_not_overridden():
     world = _world()
     assert world.grace == DEFAULT_GRACE_S

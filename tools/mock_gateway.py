@@ -78,11 +78,6 @@ def status_payload(event: str, rssi: int | None = None) -> bytes:
 DEFAULT_GRACE_S = 15.0
 DEFAULT_REPORT_INTERVAL_S = 2.0
 
-# Payloads on `control/online` (and `<gw>/online`, its LWT) that mean "not
-# online" -- mirrors `_OFFLINE_PAYLOADS` in
-# `cuddle.hub.orchestration.orchestrator`.
-_OFFLINE_ONLINE_PAYLOADS = (b"0", b"", b"false")
-
 
 @dataclass
 class MockGateway:
@@ -187,14 +182,13 @@ class ManagedGatewayWorld:
     def on_control_online(self, payload: bytes, now: float) -> None:
         """Update the boolean online state on a genuine transition only.
 
-        `"1"` means online. Anything in `_OFFLINE_ONLINE_PAYLOADS` (mirrors
-        the orchestrator's own LWT/offline payloads) means offline. Only the
+        Only `b"1"` means online; anything else means offline. Only the
         True->False edge stamps `_offline_since` -- repeated "1"s (there
         won't be any, since it's published once retained) or repeated
         offline-ish payloads while already offline are no-ops, so silence
         while online never starts a clock.
         """
-        online = payload not in _OFFLINE_ONLINE_PAYLOADS
+        online = (payload == b"1")
         if online:
             self._online = True
         elif self._online:
