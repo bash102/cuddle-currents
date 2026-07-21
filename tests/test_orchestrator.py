@@ -8,8 +8,12 @@ for a recorder so publishing is observable without any MQTT client/event loop.
 """
 
 import json
+from unittest.mock import Mock
 
-from cuddle.core.models import EnrollmentState, PersonProfile
+import pytest
+
+from cuddle.app import Engine
+from cuddle.core.models import EnrollmentState, PersonProfile, Source
 from cuddle.hub.orchestration.orchestrator import Orchestrator
 from cuddle.hub.orchestration.plan import Cmd, Pending
 from cuddle.hub.registry import SessionStore
@@ -307,3 +311,121 @@ def test_handle_message_routes_report_and_online():
 
     orch._handle_message("cuddle/gw1/online", b"0", now=101.0)
     assert orch._world.gateways["gw1"].online is False
+
+
+# ---- Engine integration (Task 5) -------------------------------------------
+#
+# The Engine owns the SessionStore, so it also builds the Orchestrator. These
+# tests exercise only construction and action-method delegation -- never
+# `Engine.start()`, which would need a live broker.
+
+
+class _StubMqttSource:
+    """Minimal stand-in for `GatewayMqttSource`. Engine.__init__ only stores
+    a reference to the source (via EnrollmentManager/IngestHub) and never
+    calls into it, so no bind/unbind/subscribe behavior is needed here."""
+
+
+def _engine(**kw):
+    return Engine(_StubMqttSource(), source_type=Source.mqtt, **kw)
+
+
+def test_orchestrate_true_with_mqtt_source_builds_orchestrator():
+    engine = _engine(orchestrate=True)
+    assert isinstance(engine.orchestrator, Orchestrator)
+    assert engine.orchestrator._store is engine.store
+
+
+def test_orchestrate_false_leaves_orchestrator_none():
+    engine = _engine(orchestrate=False)
+    assert engine.orchestrator is None
+
+
+def test_orchestrate_defaults_false():
+    engine = _engine()
+    assert engine.orchestrator is None
+
+
+def test_orchestrate_true_with_non_mqtt_source_raises():
+    with pytest.raises(ValueError, match="orchestration requires the mqtt source"):
+        Engine(object(), source_type=Source.sim, orchestrate=True)
+
+
+def test_orch_connect_delegates_to_force_connect():
+    engine = _engine(orchestrate=True)
+    engine.orchestrator.force_connect = Mock()
+
+    engine.orch_connect("bandA", "gw1")
+
+    engine.orchestrator.force_connect.assert_called_once_with("bandA", "gw1")
+
+
+def test_orch_release_delegates_to_force_release():
+    engine = _engine(orchestrate=True)
+    engine.orchestrator.force_release = Mock()
+
+    engine.orch_release("bandA")
+
+    engine.orchestrator.force_release.assert_called_once_with("bandA")
+
+
+def test_orch_pin_delegates_to_set_pin():
+    engine = _engine(orchestrate=True)
+    engine.orchestrator.set_pin = Mock()
+
+    engine.orch_pin("bandA", True)
+
+    engine.orchestrator.set_pin.assert_called_once_with("bandA", True)
+
+
+def test_orch_set_mode_delegates_to_set_mode():
+    engine = _engine(orchestrate=True)
+    engine.orchestrator.set_mode = Mock()
+
+    engine.orch_set_mode("managed")
+
+    engine.orchestrator.set_mode.assert_called_once_with("managed")
+
+
+def test_orch_connect_raises_when_orchestrator_disabled():
+    engine = _engine(orchestrate=False)
+    with pytest.raises(ValueError, match="orchestration not enabled"):
+        engine.orch_connect("bandA", "gw1")
+
+
+def test_orch_release_raises_when_orchestrator_disabled():
+    engine = _engine(orchestrate=False)
+    with pytest.raises(ValueError, match="orchestration not enabled"):
+        engine.orch_release("bandA")
+
+
+def test_orch_pin_raises_when_orchestrator_disabled():
+    engine = _engine(orchestrate=False)
+    with pytest.raises(ValueError, match="orchestration not enabled"):
+        engine.orch_pin("bandA", True)
+
+
+def test_orch_set_mode_raises_when_orchestrator_disabled():
+    engine = _engine(orchestrate=False)
+    with pytest.raises(ValueError, match="orchestration not enabled"):
+        engine.orch_set_mode("managed")
+
+
+def test_orchestrator_timing_kwargs_pulled_from_config_when_present():
+    engine = _engine(
+        orchestrate=True,
+        config={
+            "mqtt": {"broker": "127.0.0.1", "port": 1883, "topic_prefix": "cuddle"},
+            "orchestrator": {"report_debounce": 1.5, "reconcile_interval": 9.0},
+        },
+    )
+    assert engine.orchestrator._report_debounce == 1.5
+    assert engine.orchestrator._reconcile_interval == 9.0
+    # untouched timing keys keep the Orchestrator's own defaults
+    assert engine.orchestrator._pending_ttl == 8.0
+
+
+def test_orchestrator_builds_with_missing_orchestrator_config_section():
+    # cfg["orchestrator"] doesn't exist yet (added in Task 9) -- must not KeyError.
+    engine = _engine(orchestrate=True, config={})
+    assert isinstance(engine.orchestrator, Orchestrator)

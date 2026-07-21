@@ -16,8 +16,17 @@ from cuddle.core.config import load_config
 from cuddle.core.models import Source, StateFrame
 from cuddle.hub.enrollment import EnrollmentManager
 from cuddle.hub.ingest import IngestHub
+from cuddle.hub.orchestration.orchestrator import Orchestrator
 from cuddle.hub.registry import SessionStore
 from cuddle.processing import frame as frame_builder
+
+_ORCHESTRATOR_TIMING_KEYS = (
+    "report_debounce",
+    "reconcile_interval",
+    "pending_ttl",
+    "coverage_ttl",
+    "rebalance_cooldown",
+)
 
 
 class Engine:
@@ -30,6 +39,7 @@ class Engine:
         config: dict | None = None,
         enrollment_path: str = "config/enrollment.yaml",
         capture_path: str | None = None,
+        orchestrate: bool = False,
     ) -> None:
         self.cfg = config or load_config()
         self.source = source
@@ -45,11 +55,31 @@ class Engine:
         self._frame_task: asyncio.Task | None = None
         self._running = False
 
+        # The Engine owns the SessionStore, so it also builds the Orchestrator
+        # (keeps the store single-owned) -- see hub/orchestration/orchestrator.py.
+        if orchestrate and source_type != Source.mqtt:
+            raise ValueError("orchestration requires the mqtt source")
+        if orchestrate:
+            mq = self.cfg["mqtt"]
+            orch_cfg = self.cfg.get("orchestrator", {})
+            timings = {k: orch_cfg[k] for k in _ORCHESTRATOR_TIMING_KEYS if k in orch_cfg}
+            self.orchestrator = Orchestrator(
+                self.store,
+                broker=mq["broker"],
+                port=mq["port"],
+                topic_prefix=mq["topic_prefix"],
+                **timings,
+            )
+        else:
+            self.orchestrator = None
+
     async def start(self) -> None:
         self.enrollment.load()
         self.enrollment.rebind_source()
         await self.source.start()
         await self.ingest.start()
+        if self.orchestrator:
+            await self.orchestrator.start()
         self._running = True
         self._frame_task = asyncio.create_task(self._frame_loop(), name="frames")
 
@@ -59,6 +89,8 @@ class Engine:
             self._frame_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await self._frame_task
+        if self.orchestrator:
+            await self.orchestrator.stop()
         await self.ingest.stop()
         await self.source.stop()
 
@@ -67,6 +99,9 @@ class Engine:
         while self._running:
             now = clock.now()
             self.enrollment.tick(now)
+            # TODO(Task 6): pass orchestrator into build_frame once it accepts
+            # the `orchestrator=` kwarg (build_frame doesn't yet -- adding it
+            # here now would TypeError on every frame tick).
             self.latest = frame_builder.build_frame(
                 self.store,
                 self.source,
@@ -134,3 +169,22 @@ class Engine:
             raise ValueError("scenario control is only available with the simulator")
         setter(name)
         self.scenario = name
+
+    # ---- orchestration actions (called by REST routes) -------------------
+
+    def orch_set_mode(self, mode: str) -> None:
+        self._require_orchestrator().set_mode(mode)
+
+    def orch_connect(self, device_id: str, gateway_id: str) -> None:
+        self._require_orchestrator().force_connect(device_id, gateway_id)
+
+    def orch_release(self, device_id: str) -> None:
+        self._require_orchestrator().force_release(device_id)
+
+    def orch_pin(self, device_id: str, pinned: bool) -> None:
+        self._require_orchestrator().set_pin(device_id, pinned)
+
+    def _require_orchestrator(self) -> Orchestrator:
+        if self.orchestrator is None:
+            raise ValueError("orchestration not enabled")
+        return self.orchestrator
