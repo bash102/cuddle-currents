@@ -70,6 +70,39 @@ unserved instead of moving the long-connected one. Operator can manually place v
 
 Additive to the PoC contract (new topics), not a rewrite.
 
+#### Level B — real-hardware validation checklist (highest-value next step)
+
+Everything above is **mock-validated**; the single-ESP32 hardware test only exercised the
+*communication* (report / mode switch / cmd received / auto-revert) with **no bands**. One
+2-gateway session with real bands flips most unknowns into knowns. Setup: 2 IDF gateways with
+**distinct gateway ids** (each provisioned via the portal — they collide on MQTT topics if both
+default to `esp32-01`), the broker, `cuddle --source mqtt --orchestrate`, the **Ops page open in
+a browser**, and a handful of bands.
+
+- [ ] Both gateways appear in the Ops roster with correct `capacity`/`mode`; boot opportunistic,
+      flip to managed when the orchestrator starts.
+- [ ] Bands get placed via `cmd` (real `connect`), HR flows, and the roster shows each band on
+      the right gateway. Confirm the LED goes green→brighter as bands land (teal in managed).
+- [ ] **Real RSSI noise**: watch initial placement for flapping / odd strongest-gateway picks
+      (real RSSI swings ±10–20 dBm; the mock used fixed values).
+- [ ] Manual override in the browser: force-connect a `seen` band to a chosen gateway;
+      force-release; pin/unpin. Confirm Release actually sticks (the pin bug fixed in final review).
+- [ ] Enrollment: assign a band → it's pinned → force-connected → baselines → active, without a
+      rebalance ever interrupting it.
+- [ ] **Roaming/handoff**: carry a band out of one gateway's range → it drops → re-placed on
+      another gateway with `person_id` continuity (history/matrix position intact).
+- [ ] **Unserved-band rebalance** with a real coverage-overlap topology (mirror the mock's
+      band-only-reachable-via-a-full-gateway case): confirm it's served via one clean eviction,
+      no `cmd` thrash.
+- [ ] **60s coverage limitation**: let bands sit connected >1 min, then introduce an unserved
+      band — observe whether it's rebalanced in or (expected) surfaced as unserved. Decide if the
+      conservative behavior is acceptable or needs the aggressive-rebalance change.
+- [ ] **App-death auto-revert**: kill the app → both gateways revert to opportunistic within
+      ~15s (LED yellow/green per Level A) → bands stay served. Restart → they return to managed.
+- [ ] Load/robustness: with many `seen` advertisers, confirm `report` still publishes (buffer
+      sizing) and no MQTT churn; check the LED never sticks on a stale state.
+- [ ] Record results here + in the design spec; promote confirmed items out of "pending".
+
 ### 4. Broker security
 TLS, credentials, and ACLs. The PoC assumes a trusted local network; real deployments need
 auth on the broker.
