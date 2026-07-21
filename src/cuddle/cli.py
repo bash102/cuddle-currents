@@ -70,14 +70,19 @@ def build_engine(args) -> Engine:
     else:  # pragma: no cover
         raise SystemExit(f"unknown source: {args.source}")
 
-    return Engine(
-        source,
-        source_type=source_type,
-        scenario=args.scenario if args.source == "sim" else None,
-        config=cfg,
-        enrollment_path=args.enrollment,
-        capture_path=args.record,
-    )
+    orchestrate = args.orchestrate or cfg["orchestrator"]["enabled"]
+    try:
+        return Engine(
+            source,
+            source_type=source_type,
+            scenario=args.scenario if args.source == "sim" else None,
+            config=cfg,
+            enrollment_path=args.enrollment,
+            capture_path=args.record,
+            orchestrate=orchestrate,
+        )
+    except ValueError:
+        raise SystemExit("--orchestrate requires --source mqtt") from None
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -98,6 +103,8 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--host", default=None)
     ap.add_argument("--port", type=int, default=None)
     ap.add_argument("--broker", help="MQTT broker host:port (with --source mqtt)")
+    ap.add_argument("--orchestrate", action="store_true",
+                    help="run BLE->WiFi gateway orchestration (requires --source mqtt)")
     return ap
 
 
