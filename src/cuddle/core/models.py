@@ -142,6 +142,40 @@ class SynchronyState(BaseModel):
     mode: str = "zscore"  # raw | zscore | baseline_delta
 
 
+class ConnectedBand(BaseModel):
+    """A band currently connected to a gateway."""
+
+    dev: str
+    person_id: str | None = None
+    rssi: int | None = None
+
+
+class SeenBand(BaseModel):
+    """A band visible to a gateway but not yet connected."""
+
+    dev: str
+    rssi: int | None = None
+
+
+class GatewayState(BaseModel):
+    """State of a single gateway in the orchestration network."""
+
+    id: str
+    online: bool = True
+    mode: str = "opportunistic"  # "managed" | "opportunistic"
+    capacity: int = 0
+    connected: list[ConnectedBand] = Field(default_factory=list)
+    seen: list[SeenBand] = Field(default_factory=list)
+
+
+class UnservedBand(BaseModel):
+    """A band that cannot be served by any gateway."""
+
+    dev: str
+    rssi: int | None = None
+    reason: str  # "no_capacity" | "waiting_to_advertise"
+
+
 class StateFrame(BaseModel):
     """The broadcast contract. Both frontends render off this and nothing else."""
 
@@ -151,3 +185,5 @@ class StateFrame(BaseModel):
     synchrony: SynchronyState = Field(default_factory=SynchronyState)
     scenario: str | None = None
     source: Source = Source.sim
+    gateways: list[GatewayState] = Field(default_factory=list)
+    unserved: list[UnservedBand] = Field(default_factory=list)
