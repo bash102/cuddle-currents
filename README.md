@@ -59,10 +59,23 @@ trust.
 
 ## Hardware
 
-Coospo **HW706** (BT 4.0) and **HW9** (BT 5.0) both expose the standard BLE Heart Rate
-Service (`0x180D` / `0x2A37`) including RR intervals — no proprietary protocol. macOS
-CoreBluetooth holds only ~7–10 peripherals at once, which is why the full system will
-use gateways; Phase 1 stays within that limit.
+**Bands.** Coospo **HW706** (BT 4.0) and **HW9** (BT 5.0) both expose the standard BLE Heart
+Rate Service (`0x180D` / `0x2A37`) including RR intervals — no proprietary protocol. Any
+standard BLE HR strap should work.
+
+**Gateways (ESP32-S3).** macOS CoreBluetooth holds only ~7–10 peripherals at once, so scaling
+past a handful of people uses **BLE→WiFi gateways**: an ESP32-S3 connects to the bands and
+forwards the raw `0x2A37` notifications to the app over MQTT — the app still does all decoding,
+so a gateway stays a dumb bridge. Firmware lives in `firmware/`:
+
+- [`firmware/gateway-idf/`](firmware/gateway-idf/README.md) — the **ESP-IDF** build,
+  **6 concurrent bands** (hardware-validated), plus Level B "managed mode". The recommended build.
+- [`firmware/gateway/`](firmware/gateway/README.md) — the simpler **arduino-cli** build, capped
+  at **3** concurrent bands by the precompiled BT controller. Fallback / no-IDF-toolchain path.
+
+Both provision Wi-Fi + broker at runtime via a captive portal (no Wi-Fi credentials in the
+repo). Rough sizing: ~`ceil(people / 6)` IDF gateways (≈5 for 30 people). See each firmware
+README for the toolchain, build, flash, and provisioning steps.
 
 ## Quick start
 
@@ -76,6 +89,20 @@ cuddle --source sim --scenario drift_into_sync --people 6
 #   Show view (clean puddle):   http://127.0.0.1:8770/
 #   Ops view  (technical):      http://127.0.0.1:8770/ops
 ```
+
+The simulator is just the demo path. `--source` selects where samples come from:
+
+```bash
+cuddle --source ble                                   # real bands direct to the Mac (≤ ~7)
+cuddle --source mqtt --broker 192.168.1.50:1883       # bands via an ESP32 gateway, over MQTT
+cuddle --source mqtt --broker 192.168.1.50:1883 --orchestrate   # + Level B multi-gateway
+cuddle --source replay --capture captures/session.jsonl         # replay a recording, no hardware
+```
+
+`ble` needs bands in range of the Mac; `mqtt` needs a running broker (mosquitto) and at least
+one flashed gateway (see [`firmware/`](firmware/)); `--orchestrate` adds app-authoritative
+placement across gateways (Level B — see the roadmap). Any real-band run can add
+`--record captures/x.jsonl` to log raw samples for later hardware-free replay.
 
 The server binds `127.0.0.1:8770` by default (an uncommon port, to avoid colliding
 with other local services). Override the port and host per-run with
@@ -156,23 +183,24 @@ in parallel on different monitors:
 ```
 sources/  →  hub/  →  processing/  →  transport/  →  frontend/
 (BLE|sim|    (registry (resample,      (FastAPI      (show + ops
- replay)      enrollment  quality,       /ws + REST)   pages)
- behind a     ingest)     baseline,
- Protocol)                abstract,
-                          synchrony)
+ replay|      enrollment  quality,       /ws + REST)   pages)
+ mqtt gw      ingest)     baseline,
+ behind a                 abstract,
+ Protocol)                synchrony)
 ```
 
 The `SampleSource` Protocol (`src/cuddle/sources/base.py`) is the one swap point:
-direct BLE now, a gateway/MQTT source later, both feeding the same normalized
-per-person sample stream. Bands are expected to roam in and out of range — each device
+direct BLE, the simulator/replay, and the BLE→WiFi gateway (MQTT) source all feed the same
+normalized per-person sample stream — nothing downstream knows the origin. Bands are expected
+to roam in and out of range — each device
 auto-reconnects with backoff, and sessions are keyed by a stable `person_id` so a
 drop-and-rejoin preserves history and matrix position.
 
 ## Development
 
 ```bash
-pytest            # 56 tests: BLE parser, synchrony, baseline, reconnect, enrollment,
-                  #           sim scenarios, artifact correction
+pytest            # BLE parser, synchrony, baseline, reconnect, enrollment, sim scenarios,
+                  # artifact correction, MQTT gateway source, and Level B orchestration
 ```
 
 Key modules:
