@@ -105,9 +105,13 @@ additive — `cmd` and `discovery` topics, no rework of this contract.
 the reliable ceiling on the Arduino-ESP32 toolchain is **3 concurrent bands** — the
 precompiled BT controller caps concurrent ACL links at 3, and `CONFIG_BT_NIMBLE_MAX_CONNECTIONS`
 lifts only the NimBLE host table (with 6 bands present, the gateway saw all 6 but only 3
-subscribed; the rest returned `connect FAILED`). So the shipped default is **3**, gateway
-count is `ceil(people / 3)` (≈10 for 30), and raising per-gateway density requires an
-ESP-IDF firmware build with a custom `sdkconfig`. See `docs/superpowers/roadmap.md`.
+subscribed; the rest returned `connect FAILED`). **Resolved by the ESP-IDF port**
+(`firmware/gateway-idf/`): under ESP-IDF v5.5 both the NimBLE host and the BT controller
+compile from source, so `sdkconfig` (`CONFIG_BT_NIMBLE_MAX_CONNECTIONS=6` +
+`CONFIG_BT_CTRL_BLE_MAX_ACT=7`) governs the ceiling. **Hardware-validated at 6 concurrent
+bands, zero `connect FAILED`** (hard max 9; ≤6 recommended for S3 RAM). Gateway count with
+the IDF firmware is `ceil(people / 6)` (≈5 for 30); the arduino-cli build remains the 3/gateway
+fallback. See `docs/superpowers/roadmap.md`.
 
 ## 6. `GatewayMqttSource` (Python)
 

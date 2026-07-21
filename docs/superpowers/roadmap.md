@@ -68,15 +68,20 @@ Flashing and configuring many gateways; over-the-air firmware updates.
 The actual target. Validate processing/synchrony throughput, the Show puddle at ~30 dots,
 and MQTT message volume at scale. May surface tuning work in `processing/` and the frontend.
 
-**Measured gateway BLE ceiling: 3 concurrent bands (Arduino toolchain).** Hardware test
-with 6 bands: the gateway saw all 6 but only 3 subscribed; the 4th+ got repeated
-`connect FAILED`. The limit is the precompiled BT controller's concurrent-ACL cap (3) —
-`CONFIG_BT_NIMBLE_MAX_CONNECTIONS` raises only the NimBLE host table, not the controller.
+**Gateway BLE ceiling: 3 on the Arduino toolchain → 6 validated on the ESP-IDF port.**
+Arduino hardware test with 6 bands: the gateway saw all 6 but only 3 subscribed; the 4th+
+got repeated `connect FAILED`. The limit was the precompiled BT controller's concurrent-ACL
+cap (3) — `CONFIG_BT_NIMBLE_MAX_CONNECTIONS` raises only the NimBLE host table, not the
+controller. **The ESP-IDF port is now done** (`firmware/gateway-idf/`): building the same
+firmware under ESP-IDF v5.5 (arduino-esp32 3.3.10 as a component + esp-nimble-cpp 2.x)
+recompiles both host and controller from source, so `sdkconfig` governs the ceiling
+(`CONFIG_BT_NIMBLE_MAX_CONNECTIONS=6` + `CONFIG_BT_CTRL_BLE_MAX_ACT=7`). **Hardware-validated:
+6 bands connected and subscribed concurrently, zero `connect FAILED`.**
 Implications for 30-person scale:
-- **Near-term:** plan `ceil(people / 3)` gateways (≈10 for 30). Cheap and works today.
-- **To raise per-gateway density:** rebuild the firmware on **ESP-IDF** with a custom
-  `sdkconfig` (raise the controller's BLE max ACT, up to ~9) — a firmware-porting task,
-  not an arduino-cli flag. Decide gateway-count vs. IDF-port tradeoff before scaling.
+- **Now:** plan `ceil(people / 6)` gateways (≈5 for 30) with the IDF firmware. Hard max is 9;
+  ≤6 is the recommended planning number for RAM headroom on the S3.
+- Fallback: the arduino-cli build (`firmware/gateway/`) still ships at 3/gateway if the IDF
+  toolchain isn't set up.
 
 ### 7. Session persistence beyond JSONL captures
 Existing README roadmap item — durable session storage/history beyond flat capture files.
