@@ -495,6 +495,18 @@ static String g_lastReportBody;
 static unsigned long g_lastReportTime = 0;
 static const unsigned long REPORT_HEARTBEAT_MS = 2000;
 
+// buildReportBody() emits at most MAX_CONNECTIONS "connected" entries plus
+// SCAN_CACHE_MAX "seen" entries (seen already excludes held addrs, so this
+// bound is conservative, not tight). Each entry is
+// `{"dev":"aa:bb:cc:dd:ee:ff","rssi":-100},` <= 41 bytes; 48 bytes/entry
+// leaves headroom. With the current build (MAX_CONNECTIONS=6,
+// SCAN_CACHE_MAX=24) that's 512 + 30*48 = 1952 bytes for the report alone,
+// plus room for the {"capacity":...,"mode":...,"ts":...} wrapper and the
+// MQTT fixed/variable header + topic ("cuddle/<gwid>/report"). PubSubClient
+// silently drops (publish() returns false, sends nothing) any payload that
+// doesn't fit the buffer, so this must comfortably exceed the worst case.
+#define MQTT_BUF_SIZE (512 + (MAX_CONNECTIONS + SCAN_CACHE_MAX) * 48)
+
 static String buildReportBody() {
   String s = "{\"capacity\":" + String(MAX_CONNECTIONS) +
              ",\"mode\":\"" + (effectiveManaged() ? "managed" : "opportunistic") + "\"" +
@@ -525,7 +537,15 @@ static void maybePublishReport() {
   bool heartbeatDue = (now - g_lastReportTime >= REPORT_HEARTBEAT_MS);
   if (!changed && !heartbeatDue) return;
   String full = body + ",\"ts\":" + String(now) + "}";
-  mqtt.publish(reportTopic().c_str(), full.c_str(), true);  // retained
+  if (!mqtt.publish(reportTopic().c_str(), full.c_str(), true)) {  // retained
+    // PubSubClient sends nothing (not a truncated packet) when the payload
+    // exceeds its buffer. Log so an overflow is diagnosable instead of a
+    // silent stale/missing report, and don't mark it as sent — retry next
+    // loop() with the same body rather than losing this update.
+    Serial.printf("MQTT: report publish FAILED (payload %u bytes, buffer %d bytes)\n",
+                  (unsigned)full.length(), MQTT_BUF_SIZE);
+    return;
+  }
   g_lastReportBody = body;
   g_lastReportTime = now;
 }
@@ -544,7 +564,7 @@ void setup() {
 
   mqtt.setServer(g_broker.c_str(), g_port);
   mqtt.setCallback(mqttCallback);
-  mqtt.setBufferSize(640);  // report[] can hold several connected+seen entries
+  mqtt.setBufferSize(MQTT_BUF_SIZE);  // sized for the full report[] worst case; see MQTT_BUF_SIZE
   ensureMqtt();
 
   NimBLEDevice::init(g_gwid.c_str());
