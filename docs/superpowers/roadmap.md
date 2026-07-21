@@ -33,16 +33,40 @@ Run 2+ gateways with overlapping coverage. Verify in practice: band **handoff/ro
 across gateways (identity is the band, so `person_id` continuity should hold), and that
 opportunistic capacity self-balances.
 
-### 3. Level B — app-orchestrated assignment  *(in progress — [`specs/2026-07-20-level-b-orchestration-design.md`](specs/2026-07-20-level-b-orchestration-design.md))*
-The PoC ships level A (opportunistic + per-gateway cap). Level B gives the app a global view
-and control (full app authority, stability-first placement, auto-revert on orchestrator death):
-- **`discovery` topic** — gateways report *seen-but-unconnected* bands so the app knows what
-  is available network-wide (not just what's already connected).
-- **`cmd` topic** — app assigns bands to specific gateways; firmware obeys.
-- **assignment algorithm** — balance load across gateways, **solve the unserved-band edge
-  case** (a band in range of only full gateways), prefer strongest RSSI, add stickiness to
-  limit handoff churn.
-- **Ops UI** — gateway roster and which band is on which gateway.
+### 3. Level B — app-orchestrated assignment  *(done — app side + firmware code; on-hardware validation pending — [`specs/2026-07-20-level-b-orchestration-design.md`](specs/2026-07-20-level-b-orchestration-design.md))*
+The PoC shipped level A (opportunistic + per-gateway cap). Level B gives the app a global view
+and full authority (stability-first placement, auto-revert on orchestrator death). Shipped:
+- **`hub/orchestration/`** (`world.py` world-model + coverage memory, `plan.py` pure
+  stability-first planner, `orchestrator.py` async MQTT service) — enabled with
+  `cuddle --source mqtt --orchestrate` (or `orchestrator.enabled` in `app.yaml`).
+- **Additive MQTT contract**: `cuddle/<gw>/report` (retained: capacity/mode/connected/seen),
+  `cuddle/<gw>/cmd` (connect/release), `cuddle/control/mode` (managed|opportunistic,
+  retained), `cuddle/control/online` (retained, orchestrator LWT). Level A topics
+  (`hr`/`status`/`online`) are unchanged.
+- **Stability-first placement** — connected bands aren't moved except a bounded,
+  cooldown-guarded unserved-band rebalance; enrolled bands (assigned/baselining/active) are
+  pinned (force-connected immediately, protected from rebalance). Auto-reverts every gateway
+  to level A (opportunistic) if the orchestrator dies.
+- **Ops UI + REST** — `StateFrame` gained `gateways[]`/`unserved[]`; Ops gained a gateway
+  roster, an unserved-band callout, a mode toggle, and manual override
+  (`/api/orchestrator/mode`, `/connect`, `/release`, `/pin`).
+- **Firmware** (`firmware/gateway-idf`) — managed mode (report + cmd + transition-based
+  auto-revert), boot-default opportunistic. See that directory's README.
+
+**Results (Tasks 10-11, mock multi-gateway e2e)**: all servable bands connect; the
+unserved-band case (a band in range of only full gateways) gets served after a rebalance with
+**no cmd thrash** (fixed via an eviction cooldown — see `plan.py`); enrollment force-connect
+pins+connects a chosen band; killing the app flips every gateway back to opportunistic
+(auto-revert), confirmed via the mock harness. **Firmware on-hardware validation is still
+pending** — a separate hardware step (flash real ESP32 gateways, run against a live
+orchestrator) has not yet been done; do not treat firmware managed mode as hardware-validated.
+
+**Known limitation**: a band connected stably for longer than `coverage_ttl` (60s) won't be
+auto-rebalanced — its cross-gateway coverage memory (RSSI at other gateways) ages out because
+a connected BLE band stops re-advertising, so the orchestrator can't refresh it. Rather than
+rebalance on stale RSSI, the orchestrator conservatively surfaces the *other* unserved band as
+unserved instead of moving the long-connected one. Operator can manually place via Ops
+(`/api/orchestrator/connect` or `pin`).
 
 Additive to the PoC contract (new topics), not a rewrite.
 

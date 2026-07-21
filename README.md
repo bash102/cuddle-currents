@@ -197,6 +197,14 @@ Key modules:
 BLE→WiFi gateway / MQTT ingestion, ~30-person scale, and session persistence beyond
 JSONL captures.
 
+**Level B orchestration** (app-orchestrated gateway assignment) has landed on the Phase-2
+branch: `cuddle --source mqtt --orchestrate` gives the app full authority over which gateway
+holds which band (stability-first — connected bands aren't moved except a bounded
+unserved-band rebalance — with auto-revert to opportunistic per-gateway assignment if the
+orchestrator dies). Validated end-to-end against a mock multi-gateway harness; on-hardware
+validation of the firmware's managed mode is still pending. See
+[`docs/superpowers/roadmap.md`](docs/superpowers/roadmap.md) for details.
+
 ## License
 
 MIT — see [LICENSE](LICENSE).

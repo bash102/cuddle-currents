@@ -75,3 +75,29 @@ Identical to the arduino build — captive portal `Cuddle-Gateway-Setup` at `192
 hold BOOT (GPIO0) at reset to reopen it (or build with `-DFORCE_PORTAL`). Topics:
 `cuddle/<gw>/hr/<dev>` (raw 0x2A37), `cuddle/<gw>/status/<dev>`, `cuddle/<gw>/online`
 (retained LWT). See [`../gateway/README.md`](../gateway/README.md) for details.
+
+## Managed mode (Level B — app-orchestrated assignment)
+
+This build also implements the **managed mode** of the app's Level B orchestration (see the
+top-level [`docs/superpowers/roadmap.md`](../../docs/superpowers/roadmap.md)): the app, not
+the gateway, decides which bands each gateway holds. Boots **opportunistic** by default
+(today's auto-connect-up-to-capacity behavior, unchanged) and only switches to managed on an
+explicit command — a fresh-out-of-the-box or misconfigured gateway never gets stuck waiting
+for an orchestrator that isn't there.
+
+- `cuddle/<gw>/report` — retained, published on change + a ~2s heartbeat: `capacity`,
+  effective `mode`, `connected[]` (held addrs + RSSI), `seen[]` (scanned-but-unconnected
+  bands), `ts`.
+- `cuddle/<gw>/cmd` — subscribed: `{"action":"connect","dev":"..."}` looks the address up in
+  the scan cache and connects; `{"action":"release","dev":"..."}` disconnects it.
+- `cuddle/control/mode` (`managed`/`opportunistic`) and `cuddle/control/online` (the
+  orchestrator's retained liveness flag) select managed mode and gate it.
+- **Transition-based auto-revert**: managed mode holds as long as the last-known online state
+  is `true`; on a `true→online-goes-false` transition it starts a ~15s grace timer and falls
+  back to opportunistic if the orchestrator doesn't come back before it expires, then snaps
+  back to managed the instant `control/online` says `"1"` again. In managed mode the gateway
+  keeps scanning (to keep `seen[]` fresh) but never auto-connects — only `cmd` does.
+
+Implemented and build-verified (`idf.py build` clean, no new warnings); **on-hardware
+validation of managed mode is still pending** — no gateway has been flashed and run against a
+live orchestrator yet, so treat this as build-verified, not field-verified.

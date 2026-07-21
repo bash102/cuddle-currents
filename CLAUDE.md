@@ -49,8 +49,17 @@ sources/ → hub/ → processing/ → transport/ → frontend/
   (concordance matrix + PLV + cohesion), and `frame.build_frame` which assembles everything.
 - **`transport/ws_server.py`** — FastAPI: one WebSocket `/ws` broadcast + REST control
   (`/api/enroll`, `/api/reassign`, `/api/release`, `/api/retire`, `/api/baseline/start`,
-  `/api/sync-mode`, `/api/scenario`). `app.Engine` ticks enrollment + builds a frame on a
-  fixed cadence and fans it out.
+  `/api/sync-mode`, `/api/scenario`, `/api/orchestrator/{mode,connect,release,pin}`).
+  `app.Engine` ticks enrollment + builds a frame on a fixed cadence and fans it out.
+- **`hub/orchestration/`** (Level B, opt-in via `cuddle --source mqtt --orchestrate` or
+  `orchestrator.enabled` in `app.yaml`) — app-orchestrated gateway assignment: `world.py`
+  (world-model + coverage memory), `plan.py` (pure stability-first planner — connected bands
+  aren't moved except a bounded unserved-band rebalance), `orchestrator.py` (the async MQTT
+  service). Additive to the Level A contract: `cuddle/<gw>/report` (retained
+  capacity/mode/connected/seen), `cuddle/<gw>/cmd` (connect/release), `cuddle/control/mode`
+  (managed|opportunistic, retained), `cuddle/control/online` (retained, orchestrator LWT —
+  every gateway auto-reverts to opportunistic if this goes stale). `hr`/`status`/`online`
+  topics are unchanged.
 - **`frontend/`** — two decoupled pages rendering the same stream: `/` **Show** (the clean
   force-directed "puddle") and `/ops` **Ops** (technical status + reassignment UI).
 
