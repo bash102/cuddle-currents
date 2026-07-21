@@ -1,0 +1,16 @@
+# ESP-IDF build output + manager state
+build/
+sdkconfig
+sdkconfig.old
+dependencies.lock
+managed_components/
+
+# IDE / clangd index (huge; also indexes secrets.h)
+.cache/
+
+# Vendored third-party components (recreated by setup-components.sh)
+components/
+
+# Wi-Fi/broker seed defaults — never commit
+secrets.h
+main/secrets.h
