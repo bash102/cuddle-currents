@@ -100,10 +100,14 @@ Coordination levels:
 invisible to the app. Resolved by level B (or more gateways / better coverage). Level B is
 additive — `cmd` and `discovery` topics, no rework of this contract.
 
-**PoC:** level A, one gateway, a few bands. `max_connections` is enforced by the gateway;
-its default (4) is a conservative starting point **validated empirically** during firmware
-bring-up (build order step 6) — the measured reliable ceiling sets the shipped default and
-informs how many gateways the 30-person deployment needs.
+**PoC:** level A, one gateway. `max_connections` is enforced by the gateway. The earlier
+"~4–6 reliable" estimate was **corrected by hardware measurement (build order step 6):**
+the reliable ceiling on the Arduino-ESP32 toolchain is **3 concurrent bands** — the
+precompiled BT controller caps concurrent ACL links at 3, and `CONFIG_BT_NIMBLE_MAX_CONNECTIONS`
+lifts only the NimBLE host table (with 6 bands present, the gateway saw all 6 but only 3
+subscribed; the rest returned `connect FAILED`). So the shipped default is **3**, gateway
+count is `ceil(people / 3)` (≈10 for 30), and raising per-gateway density requires an
+ESP-IDF firmware build with a custom `sdkconfig`. See `docs/superpowers/roadmap.md`.
 
 ## 6. `GatewayMqttSource` (Python)
 

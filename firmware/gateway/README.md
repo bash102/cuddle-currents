@@ -76,11 +76,12 @@ arduino-cli monitor -p /dev/cu.usbserial-A5069RR4 -c baudrate=115200
 Expected serial output: Wi-Fi connect → MQTT connect → `BLE scanning for 0x180D...`,
 then `BLE connected: <addr>` as bands are found.
 
-## `MAX_CONNECTIONS` and the validation sweep
+## `MAX_CONNECTIONS` — measured ceiling: **3** (Arduino toolchain)
 
-Default is **3** (NimBLE-Arduino's built-in build ceiling — no extra flags needed). To
-attempt more concurrent bands you must raise BOTH the runtime cap and NimBLE's compile
-ceiling:
+Hardware-validated result: **3 concurrent bands** is the reliable maximum on this
+Arduino-ESP32 build, and that is the shipped default.
+
+Sweeping it higher was tested with 6 bands present:
 
 ```bash
 arduino-cli compile --fqbn "$FQBN" \
@@ -88,9 +89,13 @@ arduino-cli compile --fqbn "$FQBN" \
   firmware/gateway
 ```
 
-Finding the reliable ceiling (stability + `0x2A37` throughput + dropped beats under
-sustained streaming) is the roadmap's hardware-validation milestone — sweep this value
-and measure, then set the shipped default from the result.
+With `MAX_CONNECTIONS=6` the gateway **saw all 6** advertisers and reported `max 6 bands`,
+but only **3 subscribed** — the 4th+ returned `connect FAILED` repeatedly. The wall is the
+**precompiled BT controller's concurrent-ACL limit (3)**, not the app cap or NimBLE's host
+table: raising `CONFIG_BT_NIMBLE_MAX_CONNECTIONS` lifts the host side only. Going past 3
+requires an **ESP-IDF build with a custom `sdkconfig`** (raise the controller's BLE max ACT,
+up to ~9) — not achievable via an arduino-cli `-D` flag. Until then, plan gateway count as
+`ceil(people / 3)` (≈10 gateways for 30 people). Tracked in the roadmap.
 
 ## Validate end-to-end (no app UI needed)
 

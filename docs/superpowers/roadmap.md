@@ -68,6 +68,16 @@ Flashing and configuring many gateways; over-the-air firmware updates.
 The actual target. Validate processing/synchrony throughput, the Show puddle at ~30 dots,
 and MQTT message volume at scale. May surface tuning work in `processing/` and the frontend.
 
+**Measured gateway BLE ceiling: 3 concurrent bands (Arduino toolchain).** Hardware test
+with 6 bands: the gateway saw all 6 but only 3 subscribed; the 4th+ got repeated
+`connect FAILED`. The limit is the precompiled BT controller's concurrent-ACL cap (3) —
+`CONFIG_BT_NIMBLE_MAX_CONNECTIONS` raises only the NimBLE host table, not the controller.
+Implications for 30-person scale:
+- **Near-term:** plan `ceil(people / 3)` gateways (≈10 for 30). Cheap and works today.
+- **To raise per-gateway density:** rebuild the firmware on **ESP-IDF** with a custom
+  `sdkconfig` (raise the controller's BLE max ACT, up to ~9) — a firmware-porting task,
+  not an arduino-cli flag. Decide gateway-count vs. IDF-port tradeoff before scaling.
+
 ### 7. Session persistence beyond JSONL captures
 Existing README roadmap item — durable session storage/history beyond flat capture files.
 
