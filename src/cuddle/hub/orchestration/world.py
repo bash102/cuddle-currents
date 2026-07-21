@@ -72,7 +72,6 @@ class WorldModel:
         view.online = False
         view.connected = {}
         view.seen = {}
-        view.last_report_ts = now
 
     def holder_of(self, dev: str) -> str | None:
         """Return the id of the gateway currently holding `dev` connected,
