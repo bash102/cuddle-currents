@@ -50,6 +50,24 @@ class ScenarioBody(BaseModel):
     scenario: str
 
 
+class OrchModeBody(BaseModel):
+    mode: str
+
+
+class OrchConnectBody(BaseModel):
+    dev: str
+    gw: str
+
+
+class OrchReleaseBody(BaseModel):
+    dev: str
+
+
+class OrchPinBody(BaseModel):
+    dev: str
+    pinned: bool
+
+
 def create_app(engine) -> FastAPI:
     app = FastAPI(title="Cuddle Currents")
 
@@ -148,5 +166,37 @@ def create_app(engine) -> FastAPI:
         except ValueError as e:
             return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
         return JSONResponse({"ok": True, "scenario": body.scenario})
+
+    @app.post("/api/orchestrator/mode")
+    async def orch_mode(body: OrchModeBody) -> JSONResponse:
+        try:
+            engine.orch_set_mode(body.mode)
+        except ValueError as e:
+            return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
+        return JSONResponse({"ok": True})
+
+    @app.post("/api/orchestrator/connect")
+    async def orch_connect(body: OrchConnectBody) -> JSONResponse:
+        try:
+            engine.orch_connect(body.dev, body.gw)
+        except ValueError as e:
+            return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
+        return JSONResponse({"ok": True})
+
+    @app.post("/api/orchestrator/release")
+    async def orch_release(body: OrchReleaseBody) -> JSONResponse:
+        try:
+            engine.orch_release(body.dev)
+        except ValueError as e:
+            return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
+        return JSONResponse({"ok": True})
+
+    @app.post("/api/orchestrator/pin")
+    async def orch_pin(body: OrchPinBody) -> JSONResponse:
+        try:
+            engine.orch_pin(body.dev, body.pinned)
+        except ValueError as e:
+            return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
+        return JSONResponse({"ok": True})
 
     return app
