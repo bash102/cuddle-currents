@@ -1,0 +1,33 @@
+{
+  "grace": 15.0,
+  "gateways": [
+    {
+      "id": "gw1",
+      "capacity": 3,
+      "coverage": {
+        "AA:AA:AA:AA:AA:01": -50,
+        "AA:AA:AA:AA:AA:02": -65,
+        "AA:AA:AA:AA:AA:03": -80
+      }
+    },
+    {
+      "id": "gw2",
+      "capacity": 3,
+      "coverage": {
+        "AA:AA:AA:AA:AA:02": -55,
+        "AA:AA:AA:AA:AA:03": -60,
+        "AA:AA:AA:AA:AA:04": -70,
+        "AA:AA:AA:AA:AA:05": -85
+      }
+    },
+    {
+      "id": "gw3",
+      "capacity": 2,
+      "coverage": {
+        "AA:AA:AA:AA:AA:04": -50,
+        "AA:AA:AA:AA:AA:05": -55,
+        "AA:AA:AA:AA:AA:06": -60
+      }
+    }
+  ]
+}
