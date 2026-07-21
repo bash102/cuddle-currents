@@ -237,6 +237,85 @@ def test_unserved_band_with_rebalance_but_stale_coverage_yields_no_release():
     assert unserved == [{"dev": "bandZ", "rssi": -40, "reason": "no_capacity"}]
 
 
+def test_rebalance_target_free_slot_is_consumed_not_double_booked():
+    # gw3 saw both Y1 and Y2 advertising before they connected elsewhere --
+    # fresh coverage memory for both -- but only has ONE real free slot.
+    world = WorldModel()
+    world.apply_report(
+        "gw3",
+        _payload(
+            capacity=1,
+            connected=[],
+            seen=[{"dev": "Y1", "rssi": -40}, {"dev": "Y2", "rssi": -40}],
+        ),
+        now=90.0,
+    )
+    world.apply_report(
+        "gw1",
+        _payload(
+            capacity=1,
+            connected=[{"dev": "Y1", "rssi": -50}],
+            seen=[{"dev": "devA", "rssi": -40}],
+        ),
+        now=100.0,
+    )
+    world.apply_report(
+        "gw2",
+        _payload(
+            capacity=1,
+            connected=[{"dev": "Y2", "rssi": -50}],
+            seen=[{"dev": "devB", "rssi": -40}],
+        ),
+        now=100.0,
+    )
+
+    cmds, unserved = plan(
+        world, pinned=set(), pending={}, cfg=PlanCfg(coverage_ttl=60.0), now=100.0, allow_rebalance=True
+    )
+
+    releases = [c for c in cmds if c.action == "release"]
+    # Only ONE release may be justified by gw3's single free slot, not two.
+    assert len(releases) == 1
+    assert releases[0] == Cmd(gw="gw1", action="release", dev="Y1")
+    assert unserved == [{"dev": "devB", "rssi": -40, "reason": "no_capacity"}]
+
+
+def test_offline_managed_gateway_never_issued_a_connect():
+    world = WorldModel()
+    # gw_offline had ample free capacity and saw bandA advertising, but then
+    # goes offline -- its connected/seen state (and thus any slot it could
+    # have offered) is wiped, so it must never receive a connect.
+    world.apply_report(
+        "gw_offline",
+        _payload(
+            capacity=5,
+            mode="managed",
+            connected=[{"dev": "other", "rssi": -1}],
+            seen=[{"dev": "bandA", "rssi": -50}],
+        ),
+        now=100.0,
+    )
+    world.set_offline("gw_offline", now=105.0)
+    # A second managed+online gateway also sees bandA but is already full.
+    world.apply_report(
+        "gw_full",
+        _payload(
+            capacity=1,
+            mode="managed",
+            connected=[{"dev": "bandFull", "rssi": -40}],
+            seen=[{"dev": "bandA", "rssi": -45}],
+        ),
+        now=110.0,
+    )
+
+    cmds, unserved = plan(
+        world, pinned=set(), pending={}, cfg=PlanCfg(), now=110.0, allow_rebalance=False
+    )
+
+    assert cmds == []
+    assert unserved == [{"dev": "bandA", "rssi": -45, "reason": "no_capacity"}]
+
+
 def test_pinned_band_with_no_gateway_seeing_it_is_waiting_to_advertise():
     world = WorldModel()
     world.apply_report("gw1", _payload(capacity=5, connected=[], seen=[]), now=100.0)

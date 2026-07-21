@@ -169,6 +169,11 @@ def plan(
                     if target is not None:
                         cmds.append(Cmd(gw=full_gw, action="release", dev=y))
                         released_from.add(full_gw)
+                        # Consume the target's free slot so a later dev in this
+                        # same call can't cite it again to justify another
+                        # release -- one reabsorb per real slot, not per slot
+                        # *sighting*.
+                        free_slots[target] -= 1
                         released = True
                         break
                 if released:
