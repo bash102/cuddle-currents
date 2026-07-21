@@ -104,9 +104,19 @@ class WorldModel:
 
     def prune_coverage(self, now: float, ttl: float) -> None:
         """Drop coverage entries older than `ttl` seconds (relative to
-        `now`); keeps entries at or within the ttl."""
+        `now`); keeps entries at or within the ttl.
+
+        Devs currently in `connected_devs()` are frozen and never pruned,
+        however stale their entries: a connected band stops advertising, so
+        it has no way to refresh its coverage memory via `seen` while
+        connected. Dropping it would erase the only record of its alternate
+        gateways, making it impossible to rebalance later.
+        """
+        connected = self.connected_devs()
         stale_devs: list[str] = []
         for dev, by_gw in self.coverage.items():
+            if dev in connected:
+                continue
             stale_gws = [gw for gw, (_, ts) in by_gw.items() if now - ts > ttl]
             for gw in stale_gws:
                 del by_gw[gw]

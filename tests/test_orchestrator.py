@@ -179,6 +179,102 @@ def test_run_plan_populates_unserved():
     assert orch.unserved()[0].reason == "no_capacity"
 
 
+# ---- eviction cooldown (Task 2 fix): stops release/reconnect thrash -------
+
+
+def test_run_plan_records_eviction_after_rebalance_release():
+    # gw1 (capacity 1) holds bandY; bandZ is unserved, only reachable via
+    # gw1. gw2 has a free slot and fresh coverage of bandY, so a rebalance
+    # releases bandY to make room for bandZ.
+    orch = _orch(evict_cooldown=15.0)
+    orch._handle_report(
+        "gw1",
+        json.dumps(
+            _payload(capacity=1, connected=[{"dev": "bandY", "rssi": -30}], seen=[{"dev": "bandZ", "rssi": -40}])
+        ).encode(),
+        now=100.0,
+    )
+    orch._handle_report(
+        "gw2",
+        json.dumps(_payload(capacity=1, connected=[], seen=[{"dev": "bandY", "rssi": -60}])).encode(),
+        now=100.0,
+    )
+
+    cmds = orch._run_plan(100.0, allow_rebalance=True)
+
+    assert cmds == [Cmd(gw="gw1", action="release", dev="bandY")]
+    assert orch._evicted == {"bandY": {"gw1": 100.0 + 15.0}}
+
+
+def test_evicted_entry_pruned_once_deadline_passes():
+    orch = _orch(evict_cooldown=15.0)
+    orch._handle_report(
+        "gw1",
+        json.dumps(
+            _payload(capacity=1, connected=[{"dev": "bandY", "rssi": -30}], seen=[{"dev": "bandZ", "rssi": -40}])
+        ).encode(),
+        now=100.0,
+    )
+    orch._handle_report(
+        "gw2",
+        json.dumps(_payload(capacity=1, connected=[], seen=[{"dev": "bandY", "rssi": -60}])).encode(),
+        now=100.0,
+    )
+    orch._run_plan(100.0, allow_rebalance=True)
+    assert orch._evicted == {"bandY": {"gw1": 115.0}}
+
+    # World state unchanged (no confirming report yet); advancing past the
+    # deadline must prune the stale entry on the next _run_plan call.
+    orch._run_plan(116.0, allow_rebalance=False)
+
+    assert orch._evicted == {}
+
+
+def test_evicted_map_threaded_into_plan_breaks_the_thrash():
+    # This is the end-to-end regression test for the defect: bandY sits on
+    # gw1 (its strongest gw) with bandZ unserved (only reachable via gw1);
+    # gw2 offers bandY a fresh-coverage escape route. Without the eviction
+    # bar, once bandY is released it would win gw1's freed slot straight
+    # back on the very next tick (its signal there is strongest), and
+    # bandZ would stay unserved forever.
+    orch = _orch(evict_cooldown=15.0)
+    orch._handle_report(
+        "gw1",
+        json.dumps(
+            _payload(capacity=1, connected=[{"dev": "bandY", "rssi": -30}], seen=[{"dev": "bandZ", "rssi": -40}])
+        ).encode(),
+        now=100.0,
+    )
+    orch._handle_report(
+        "gw2",
+        json.dumps(_payload(capacity=1, connected=[], seen=[{"dev": "bandY", "rssi": -60}])).encode(),
+        now=100.0,
+    )
+
+    first = orch._run_plan(100.0, allow_rebalance=True)
+    assert first == [Cmd(gw="gw1", action="release", dev="bandY")]
+
+    # gw1's next report confirms the release: bandY is no longer connected
+    # and (since it never stopped physically being closest to gw1) is seen
+    # advertising there again, right alongside bandZ.
+    orch._handle_report(
+        "gw1",
+        json.dumps(
+            _payload(
+                capacity=1,
+                connected=[],
+                seen=[{"dev": "bandZ", "rssi": -40}, {"dev": "bandY", "rssi": -30}],
+            )
+        ).encode(),
+        now=101.0,
+    )
+
+    second = orch._run_plan(101.0, allow_rebalance=True)
+
+    assert Cmd(gw="gw1", action="connect", dev="bandZ") in second
+    assert all(not (c.dev == "bandY" and c.gw == "gw1") for c in second)
+
+
 # ---- (d) _pinned returns only assigned/baselining/active devices ----------
 
 

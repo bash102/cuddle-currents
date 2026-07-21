@@ -13,6 +13,13 @@ Priority order (a dev handled by an earlier rule is never reconsidered):
    unserved advertising dev get to bump an unpinned connected occupant off a
    *different* gateway that fresh coverage memory says can reach it -- one
    release per gateway per call, and a pinned dev is never a release target.
+
+`plan()` returns `(cmds, unserved, evictions)`: `evictions` is a list of
+`(dev, gw)` pairs, one per rebalance `release` Cmd emitted in step 3, so the
+caller can bar that dev from immediately being placed back on that gw (see
+the `evicted` parameter) -- without this, a released dev can be re-placed on
+the very gateway it was just released from on the next tick, thrashing
+forever instead of freeing the slot for the band that needed it.
 """
 
 from __future__ import annotations
@@ -86,7 +93,8 @@ def plan(
     now: float,
     *,
     allow_rebalance: bool,
-) -> tuple[list[Cmd], list[dict]]:
+    evicted: dict[str, set[str]] = {},
+) -> tuple[list[Cmd], list[dict], list[tuple[str, str]]]:
     connected = world.connected_devs()
     adv = world.advertising()
 
@@ -110,16 +118,19 @@ def plan(
 
     cmds: list[Cmd] = []
     unserved: list[dict] = []
+    evictions: list[tuple[str, str]] = []
     deferred_pinned: list[str] = []
     deferred_unpinned: list[str] = []
 
     def try_place(dev: str) -> bool:
         """Connect `dev` to the strongest eligible gw with a free slot, if
-        any. Mutates `free_slots` and appends a Cmd on success."""
+        any -- excluding any gw `dev` is currently evicted from. Mutates
+        `free_slots` and appends a Cmd on success."""
+        barred = evicted.get(dev, set())
         candidates = {
             gw_id: rssi
             for gw_id, rssi in adv.get(dev, {}).items()
-            if gw_id in eligible_gws and free_slots.get(gw_id, 0) > 0
+            if gw_id in eligible_gws and free_slots.get(gw_id, 0) > 0 and gw_id not in barred
         }
         if not candidates:
             return False
@@ -168,6 +179,7 @@ def plan(
                     )
                     if target is not None:
                         cmds.append(Cmd(gw=full_gw, action="release", dev=y))
+                        evictions.append((y, full_gw))
                         released_from.add(full_gw)
                         # Consume the target's free slot so a later dev in this
                         # same call can't cite it again to justify another
@@ -182,4 +194,4 @@ def plan(
         if not released:
             unserved.append({"dev": dev, "rssi": report_rssi, "reason": "no_capacity"})
 
-    return cmds, unserved
+    return cmds, unserved, evictions

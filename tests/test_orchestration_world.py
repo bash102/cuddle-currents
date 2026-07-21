@@ -131,6 +131,38 @@ def test_prune_coverage_drops_only_stale_gateway_entry_for_multi_gateway_dev():
     assert world.coverage["BB:02"]["gw2"] == (-75, 190.0)
 
 
+def test_prune_coverage_keeps_entry_for_currently_connected_dev():
+    world = WorldModel()
+    # gw2 saw BB:02 advertising at now=0
+    world.apply_report("gw2", _payload(seen=[{"dev": "BB:02", "rssi": -75}]), now=0.0)
+    # BB:02 has since connected on gw1 -- it stops advertising, so it can never
+    # refresh its gw2 coverage entry via `seen` again.
+    world.apply_report("gw1", _payload(connected=[{"dev": "BB:02", "rssi": -40}]), now=50.0)
+
+    # Far past ttl relative to the gw2 coverage entry's timestamp (now=0).
+    world.prune_coverage(now=200.0, ttl=50.0)
+
+    # BB:02 is still connected (on gw1), so its gw2 coverage memory must be
+    # frozen in place -- pruning it would strand a future rebalance with no
+    # alternate gateway to hand it to.
+    assert world.coverage["BB:02"]["gw2"] == (-75, 0.0)
+
+
+def test_prune_coverage_drops_stale_entry_once_dev_disconnects():
+    world = WorldModel()
+    world.apply_report("gw2", _payload(seen=[{"dev": "BB:02", "rssi": -75}]), now=0.0)
+    world.apply_report("gw1", _payload(connected=[{"dev": "BB:02", "rssi": -40}]), now=50.0)
+
+    # BB:02 disconnects from gw1 and is not re-seen advertising anywhere, so
+    # it drops out of connected_devs() with no fresh coverage entry either.
+    world.apply_report("gw1", _payload(), now=60.0)
+
+    world.prune_coverage(now=200.0, ttl=50.0)
+
+    # No longer connected anywhere -- the stale gw2 entry prunes normally.
+    assert "BB:02" not in world.coverage
+
+
 def test_set_offline_marks_gateway_offline_and_clears_connected_and_seen():
     world = WorldModel()
     world.apply_report(

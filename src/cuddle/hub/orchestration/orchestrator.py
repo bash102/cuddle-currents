@@ -57,6 +57,7 @@ class Orchestrator:
         pending_ttl: float = 8.0,
         coverage_ttl: float = 60.0,
         rebalance_cooldown: float = 10.0,
+        evict_cooldown: float = 10.0,
     ) -> None:
         self._store = store
         self._broker = broker
@@ -67,9 +68,11 @@ class Orchestrator:
         self._pending_ttl = pending_ttl
         self._coverage_ttl = coverage_ttl
         self._rebalance_cooldown = rebalance_cooldown
+        self._evict_cooldown = evict_cooldown
 
         self._world = WorldModel()
         self._pending: dict[str, Pending] = {}
+        self._evicted: dict[str, dict[str, float]] = {}
         self._manual_pins: set[str] = set()
         self._unserved: list[UnservedBand] = []
         self._last_rebalance_at: float | None = None
@@ -163,9 +166,34 @@ class Orchestrator:
     def _run_plan(self, now: float, *, allow_rebalance: bool) -> list[Cmd]:
         pinned = self._pinned() | self._manual_pins
         cfg = PlanCfg(coverage_ttl=self._coverage_ttl)
-        cmds, unserved = plan(
-            self._world, pinned, self._pending, cfg, now, allow_rebalance=allow_rebalance
+
+        # Prune expired evictions and build the still-live evicted map to
+        # pass into plan() -- a gw whose eviction deadline has passed is
+        # usable again.
+        evicted: dict[str, set[str]] = {}
+        for dev in list(self._evicted):
+            live = {gw: deadline for gw, deadline in self._evicted[dev].items() if deadline > now}
+            if live:
+                self._evicted[dev] = live
+                evicted[dev] = set(live)
+            else:
+                del self._evicted[dev]
+
+        cmds, unserved, evictions = plan(
+            self._world,
+            pinned,
+            self._pending,
+            cfg,
+            now,
+            allow_rebalance=allow_rebalance,
+            evicted=evicted,
         )
+
+        # Bar every dev just released by a rebalance from immediately
+        # returning to the gw it was released from, for `_evict_cooldown`
+        # seconds -- this is what stops the release/reconnect thrash.
+        for dev, gw in evictions:
+            self._evicted.setdefault(dev, {})[gw] = now + self._evict_cooldown
 
         for cmd in cmds:
             if cmd.action == "connect":
@@ -176,6 +204,15 @@ class Orchestrator:
             p = self._pending[dev]
             if dev in connected or p.deadline <= now:
                 del self._pending[dev]
+
+        # Optional cleanup: a dev that's connected somewhere other than the
+        # gw(s) it's evicted from has already relocated successfully -- no
+        # need to keep barring it, so drop its eviction record early rather
+        # than waiting out the deadline.
+        for dev in list(self._evicted):
+            holder = self._world.holder_of(dev)
+            if holder is not None and holder not in self._evicted[dev]:
+                del self._evicted[dev]
 
         self._unserved = [
             UnservedBand(dev=u["dev"], rssi=u["rssi"], reason=u["reason"]) for u in unserved
