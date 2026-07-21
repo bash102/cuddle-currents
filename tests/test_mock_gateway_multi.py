@@ -168,54 +168,60 @@ def test_report_shape_matches_wire_contract():
 
 
 # ---- control/mode + control/online + auto-revert -----------------------------
+#
+# `control/online` is published RETAINED exactly once per orchestrator
+# session ("1" on start, "0" on stop/LWT) by the real orchestrator -- it is
+# NOT a repeating heartbeat. So auto-revert must trip on a genuine
+# online->offline TRANSITION (or on never having seen an online message at
+# all), never on mere silence while online.
 
 
-def test_managed_mode_holds_while_online_heartbeats_arrive():
+def test_managed_mode_holds_on_silence_after_a_single_online_message():
+    # This is the real-orchestrator case: "1" is published once, retained,
+    # and never repeated. Silence afterwards -- even well past grace -- must
+    # NOT revert to opportunistic, or a healthy app would falsely lose every
+    # gateway ~grace seconds after connect.
     world = _world(grace=15.0)
     world.on_control_mode(b"managed")
     world.on_control_online(b"1", now=0.0)
 
     assert world.effective_mode(now=10.0) == "managed"
+    assert world.effective_mode(now=1_000.0) == "managed"
 
 
-def test_auto_revert_to_opportunistic_after_grace_elapses_without_online():
+def test_auto_revert_after_online_then_explicit_offline_transition():
     world = _world(grace=15.0)
     world.on_control_mode(b"managed")
     world.on_control_online(b"1", now=0.0)
+    world.on_control_online(b"0", now=5.0)  # genuine online -> offline edge
 
-    assert world.effective_mode(now=14.9) == "managed"
-    assert world.effective_mode(now=15.0) == "opportunistic"
+    assert world.effective_mode(now=5.0 + 15.0 - 0.1) == "managed"
+    assert world.effective_mode(now=5.0 + 15.0) == "opportunistic"
 
 
-def test_auto_revert_also_triggers_when_online_goes_explicitly_zero():
+def test_snap_back_to_managed_when_online_resumes_after_offline():
     world = _world(grace=15.0)
     world.on_control_mode(b"managed")
     world.on_control_online(b"1", now=0.0)
-    world.on_control_online(b"0", now=5.0)  # explicit 0 doesn't reset the clock
+    world.on_control_online(b"0", now=5.0)
+    assert world.effective_mode(now=25.0) == "opportunistic"
 
-    assert world.effective_mode(now=14.0) == "managed"
-    assert world.effective_mode(now=16.0) == "opportunistic"
+    world.on_control_online(b"1", now=26.0)
 
-
-def test_snap_back_to_managed_when_online_resumes():
-    world = _world(grace=15.0)
-    world.on_control_mode(b"managed")
-    world.on_control_online(b"1", now=0.0)
-    assert world.effective_mode(now=20.0) == "opportunistic"
-
-    world.on_control_online(b"1", now=21.0)
-
-    assert world.effective_mode(now=25.0) == "managed"
+    assert world.effective_mode(now=30.0) == "managed"
 
 
-def test_managed_mode_with_no_online_heartbeat_ever_stays_opportunistic():
+def test_managed_mode_with_no_online_message_ever_stays_opportunistic():
+    # Safe boot default: a gateway with no orchestrator present (or one that
+    # hasn't announced itself yet) must not sit in `managed` indefinitely.
     world = _world(grace=15.0)
     world.on_control_mode(b"managed")
 
     assert world.effective_mode(now=1.0) == "opportunistic"
+    assert world.effective_mode(now=1_000.0) == "opportunistic"
 
 
-def test_opportunistic_commanded_mode_ignores_online_heartbeat():
+def test_opportunistic_commanded_mode_ignores_online_state():
     world = _world(grace=15.0)
     world.on_control_mode(b"opportunistic")
     world.on_control_online(b"1", now=0.0)

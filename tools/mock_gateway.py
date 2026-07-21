@@ -78,6 +78,11 @@ def status_payload(event: str, rssi: int | None = None) -> bytes:
 DEFAULT_GRACE_S = 15.0
 DEFAULT_REPORT_INTERVAL_S = 2.0
 
+# Payloads on `control/online` (and `<gw>/online`, its LWT) that mean "not
+# online" -- mirrors `_OFFLINE_PAYLOADS` in
+# `cuddle.hub.orchestration.orchestrator`.
+_OFFLINE_ONLINE_PAYLOADS = (b"0", b"", b"false")
+
 
 @dataclass
 class MockGateway:
@@ -101,11 +106,18 @@ class ManagedGatewayWorld:
       - `connected`: dev -> holding gateway id, the ONE piece of state that
         must be centralized (see module docstring).
       - the commanded mode (`cuddle/control/mode`) and the orchestrator's
-        online heartbeat (`cuddle/control/online`), from which every mock
+        online presence (`cuddle/control/online`), from which every mock
         gateway's `report.mode` derives via `effective_mode` -- including
         the auto-revert-to-opportunistic-after-grace behavior real gateway
         firmware is specified to implement (see
         docs/superpowers/specs/2026-07-20-level-b-orchestration-design.md §8).
+
+        `control/online` is published RETAINED exactly once per orchestrator
+        session ("1" on start, "0" on stop/LWT) -- it is NOT a heartbeat that
+        repeats while the orchestrator is healthy. So auto-revert must trip
+        on a genuine online->offline TRANSITION (or on having never seen an
+        online message at all), never on mere silence while online: a single
+        "1" with no further messages, ever, must hold `managed` forever.
     """
 
     def __init__(self, gateways: list[MockGateway], *, grace: float = DEFAULT_GRACE_S) -> None:
@@ -113,7 +125,12 @@ class ManagedGatewayWorld:
         self.connected: dict[str, str] = {}  # dev -> holding gateway id
         self.commanded_mode: str = "opportunistic"  # boot default per spec
         self.grace = grace
-        self._last_online_at: float | None = None
+        self._online: bool = False
+        # No control/online message has ever arrived -- treat as offline
+        # since the dawn of time, so a gateway with no orchestrator present
+        # reverts to opportunistic immediately after `grace` (the safe boot
+        # default), same as an explicit "0" received infinitely long ago.
+        self._offline_since: float = float("-inf")
 
     # ---- per-gateway view ---------------------------------------------------
 
@@ -168,16 +185,26 @@ class ManagedGatewayWorld:
         self.commanded_mode = payload.decode().strip()
 
     def on_control_online(self, payload: bytes, now: float) -> None:
-        if payload == b"1":
-            self._last_online_at = now
-        # Anything else ("0", empty, garbage) leaves `_last_online_at` where
-        # it is, so the "how long since the last 1" clock keeps running --
-        # that single clock is what makes "0 or absent for `grace`" one check.
+        """Update the boolean online state on a genuine transition only.
+
+        `"1"` means online. Anything in `_OFFLINE_ONLINE_PAYLOADS` (mirrors
+        the orchestrator's own LWT/offline payloads) means offline. Only the
+        True->False edge stamps `_offline_since` -- repeated "1"s (there
+        won't be any, since it's published once retained) or repeated
+        offline-ish payloads while already offline are no-ops, so silence
+        while online never starts a clock.
+        """
+        online = payload not in _OFFLINE_ONLINE_PAYLOADS
+        if online:
+            self._online = True
+        elif self._online:
+            self._online = False
+            self._offline_since = now
 
     def effective_mode(self, now: float) -> str:
         if self.commanded_mode != "managed":
             return "opportunistic"
-        if self._last_online_at is None or now - self._last_online_at >= self.grace:
+        if not self._online and now - self._offline_since >= self.grace:
             return "opportunistic"
         return "managed"
 
