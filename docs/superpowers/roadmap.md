@@ -116,3 +116,25 @@ Existing README roadmap item — durable session storage/history beyond flat cap
   the app. Fixed by level B (or more gateways / better coverage).
 - **Handoff churn**: without stickiness, a band on the edge of two gateways could flap
   between them. Addressed by the level B assignment algorithm.
+
+## Backlog — Ops UI & firmware polish
+
+Small, independent polish items (no dependencies; pick up any time):
+
+- **Ops enroll: confirm on Enter.** Pressing Enter in the enroll name field should confirm
+  the name→band enrollment (currently requires clicking the button).
+- **Ops HR charts: labeled axes.** Add x (time) and y (bpm) axes to the per-person HR charts.
+- **Ops: remove the orbiting circle.** Drop the orbiting-circle element/animation on the Ops
+  page.
+- **Firmware: add RGB status LED.** *(Reviewed: the firmware currently drives no LED at all —
+  status is Serial + MQTT only. This is a greenfield add, not a fix.)* Add onboard-RGB status
+  indication via `rgbLedWrite(RGB_BUILTIN, r, g, b)` (generic `esp32s3` variant = NeoPixel on
+  **GPIO48**; confirm the pin on the actual board first — clones vary, some use 38 or have no
+  RGB). Drive a single `updateLed()` from `loop()` (never a BLE callback) off state the report
+  builder already tracks (`WiFi.status()`, `mqtt.connected()`, `heldCount`, `effectiveManaged()`,
+  portal flag). **Keep it dim** — low brightness (cap channel values ~≤24, well under the
+  default `RGB_BRIGHTNESS 64`). One LED ⇒ prioritize/multiplex states:
+  portal = pulsing blue · Wi-Fi connecting = yellow · MQTT down = orange · idle (MQTT ok, 0
+  bands) = dim green · ≥1 band = green (brightness/blinks ∝ count) · managed mode = blue
+  accent · error (BLE fault / publish failing) = red. Priority: error > portal > link-down >
+  band activity. ~30–50 lines, no new deps.
