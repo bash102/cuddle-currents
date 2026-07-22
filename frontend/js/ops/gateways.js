@@ -25,6 +25,12 @@ const pinnedLocally = new Set();
 // operator's own toggles locally from there.
 let globalMode = null;
 
+// The version most recently pushed via "Update fleet" this session. A gateway is
+// flagged out-of-date when its reported `version` differs from this. `null` means
+// no push has happened yet in this session, so we don't know what "current" is and
+// no gateway is flagged.
+let expectedVersion = null;
+
 // Gateway display aliases are an Ops-UI-only convenience so an operator can
 // tell which physical gateway is which ("Living Room" vs esp32-01-a172e0).
 // They live in localStorage keyed by gateway id -- never sent to the backend
@@ -120,6 +126,66 @@ function initModeToggle() {
     await post("/api/orchestrator/mode", { mode: next });
     globalMode = next;
     el("orchModeToggle").textContent = globalMode;
+  });
+}
+
+// ---- OTA: host line + "Update fleet" upload ----------------------------------
+
+function renderOtaHeader(otaUrlBase) {
+  const line = el("otaHostLine");
+  if (!line) return;
+  if (otaUrlBase) {
+    line.textContent = `Serving OTA from ${otaUrlBase}`;
+    line.classList.remove("warn");
+  } else {
+    line.textContent = "Not LAN-reachable — start with --host 0.0.0.0 to enable OTA pushes";
+    line.classList.add("warn");
+  }
+}
+
+let otaNoteTimer = null;
+
+function showOtaNote(text, isError) {
+  const note = el("otaNote");
+  if (!note) return;
+  clearTimeout(otaNoteTimer);
+  note.textContent = text;
+  note.classList.toggle("error", !!isError);
+  note.classList.toggle("success", !isError);
+  note.style.display = "";
+  // Errors stay put until the next attempt; success notes are transient.
+  if (!isError) otaNoteTimer = setTimeout(() => { note.style.display = "none"; }, 6000);
+}
+
+async function pushFirmware(file) {
+  const btn = el("updateFleetBtn");
+  if (btn) { btn.disabled = true; btn.textContent = "Updating…"; }
+  try {
+    const fd = new FormData();
+    fd.append("bin", file);
+    const r = await fetch("/api/ota", { method: "POST", body: fd });
+    const body = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      showOtaNote(body.detail || r.statusText || "OTA push failed", true);
+      return;
+    }
+    expectedVersion = body.version; // drives the out-of-date flag on gateway cards
+    showOtaNote(`pushed ${body.version} to ${(body.gateways || []).length} gateway(s)`, false);
+  } catch (e) {
+    showOtaNote(String(e), true);
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = "Update fleet"; }
+  }
+}
+
+function initOta() {
+  const btn = el("updateFleetBtn");
+  const input = el("otaFileInput");
+  btn.addEventListener("click", () => input.click());
+  input.addEventListener("change", async () => {
+    const file = input.files && input.files[0];
+    input.value = ""; // allow re-selecting the same file on a later attempt
+    if (file) await pushFirmware(file);
   });
 }
 
@@ -238,9 +304,11 @@ function makeGatewayCard() {
       <span class="name gwid"></span>
       <button class="gwrename" title="rename this gateway (local label only)">✎</button>
       <span class="badge gwmode"></span>
+      <span class="gwversion"></span>
       <span class="grow"></span>
       <span class="gwcap"></span>
     </div>
+    <div class="gwota" style="display: none"></div>
     <div class="gwsection">
       <div class="gwlabel">connected</div>
       <div class="gwconnected"></div>
@@ -257,6 +325,8 @@ function makeGatewayCard() {
     id: root.querySelector(".gwid"),
     rename: root.querySelector(".gwrename"),
     mode: root.querySelector(".gwmode"),
+    version: root.querySelector(".gwversion"),
+    ota: root.querySelector(".gwota"),
     cap: root.querySelector(".gwcap"),
     connectedWrap: root.querySelector(".gwconnected"),
     connectedEmpty: root.querySelector(".gwconnectedempty"),
@@ -292,6 +362,7 @@ function reconcileRows(wrap, emptyNode, rows, bands, makeRow, updateRow) {
 
 export function initGateways() {
   initModeToggle();
+  initOta();
 }
 
 export function renderGateways(frame) {
@@ -308,6 +379,7 @@ export function renderGateways(frame) {
     el("orchModeToggle").textContent = globalMode;
   }
 
+  renderOtaHeader(frame.ota_url_base);
   renderUnserved(unserved);
 
   const allGatewayIds = gateways.map((g) => g.id);
@@ -335,6 +407,21 @@ export function renderGateways(frame) {
     node.mode.textContent = gw.mode;
     node.mode.classList.toggle("managed", gw.mode === "managed");
     node.cap.textContent = `${gw.connected.length}/${gw.capacity}`;
+
+    node.version.textContent = gw.version ? `v${gw.version}` : "v?";
+    const outdated = expectedVersion != null && gw.version !== expectedVersion;
+    node.version.classList.toggle("outdated", outdated);
+    node.version.title = outdated ? `out of date — latest pushed is v${expectedVersion}` : "";
+
+    if (gw.ota) {
+      node.ota.textContent = gw.ota.phase;
+      node.ota.title = gw.ota.detail || "";
+      node.ota.style.display = "";
+    } else {
+      node.ota.textContent = "";
+      node.ota.title = "";
+      node.ota.style.display = "none";
+    }
 
     reconcileRows(
       node.connectedWrap, node.connectedEmpty, node.connectedRows, gw.connected,

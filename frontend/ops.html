@@ -111,6 +111,17 @@
       .releasebtn:hover { background: var(--bad); color: #2a0f12; }
       .releasebtn.confirm { background: var(--bad); color: #2a0f12; }
       .connectsel { font-size: 11px; padding: 2px 5px; color: var(--muted); max-width: 160px; }
+
+      /* -- OTA (firmware update) controls, in the gateways panel header -- */
+      .updatefleetbtn { font-size: 12px; padding: 4px 10px; }
+      .otahost { font-size: 11px; color: var(--muted); margin: -4px 0 10px; }
+      .otahost.warn { color: var(--warn); }
+      .otanote { font-size: 11px; margin: -4px 0 10px; }
+      .otanote.success { color: var(--good); }
+      .otanote.error { color: var(--bad); }
+      .gwversion { font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
+      .gwversion.outdated { color: var(--warn); }
+      .gwota { font-size: 11px; color: var(--accent-2); margin-top: 6px; }
     </style>
   </head>
   <body>
@@ -172,7 +183,11 @@
         <span class="kv">orchestrator mode
           <button id="orchModeToggle" class="modetoggle" title="toggle managed / opportunistic for all gateways">—</button>
         </span>
+        <button id="updateFleetBtn" class="updatefleetbtn" title="push a new firmware image to all gateways">Update fleet</button>
+        <input id="otaFileInput" type="file" accept=".bin" style="display: none" />
       </div>
+      <div id="otaHostLine" class="otahost"></div>
+      <div id="otaNote" class="otanote" style="display: none"></div>
       <div id="unservedCallout" class="unserved" style="display: none">
         <div class="unservedhead">⚠ Unserved bands</div>
         <div id="unservedList"></div>
