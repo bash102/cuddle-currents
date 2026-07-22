@@ -174,7 +174,11 @@ def _plv_matrix(ph_series: list[np.ndarray]) -> np.ndarray:
     return plv
 
 
-def compute(sessions, now: float, cfg: dict) -> dict:
+def compute(sessions, now: float, cfg: dict, hr_grids: dict | None = None) -> dict:
+    """`hr_grids` optionally supplies each person's already-computed smoothed-HR
+    grid over the sync window (`person_id -> (grid, smooth)`), so build_frame — which
+    computes that same grid for the `hr_var` readout — isn't recomputed here. Must
+    be the grid for THIS window/hz/tau/art; omitted people fall back to recompute."""
     proc = cfg["processing"]
     window = proc["sync_window"]
     hz = proc["resample_hz"]
@@ -195,7 +199,10 @@ def compute(sessions, now: float, cfg: dict) -> dict:
             continue
         if s.last_seen is None or (now - s.last_seen) > grace:
             continue
-        _, hr = smoothed_hr_grid(s, now - window, now, hz, tau, art)
+        if hr_grids is not None and s.person_id in hr_grids:
+            _, hr = hr_grids[s.person_id]
+        else:
+            _, hr = smoothed_hr_grid(s, now - window, now, hz, tau, art)
         if not np.isfinite(hr).any():
             continue
         people.append(s)

@@ -157,3 +157,36 @@ def test_vectorized_plv_matrix_matches_loop():
                 float(np.abs(np.mean(np.exp(1j * (ph[i][m] - ph[j][m]))))) if m.sum() >= 3 else 0.0
             )
     assert np.allclose(_plv_matrix(ph), ref, atol=1e-9)
+
+
+def test_compute_hr_grids_reuse_matches_recompute():
+    # build_frame precomputes each person's smoothed-HR grid and passes it to
+    # compute() via hr_grids; that must be identical to compute() recomputing it.
+    from cuddle.core.config import load_config
+    from cuddle.core.models import EnrollmentState, NormalizedSample, PersonProfile, Source
+    from cuddle.hub.registry import SessionStore
+    from cuddle.processing import abstract, synchrony
+
+    cfg = load_config(None)
+    proc, art = cfg["processing"], cfg.get("artifact")
+    rng = np.random.default_rng(5)
+    now = 1000.0
+    store = SessionStore()
+    for k in range(4):
+        store.create_person(PersonProfile(person_id=f"p{k}", display_name=f"P{k}",
+                                          device_id=f"D{k}", enrollment_state=EnrollmentState.active))
+        s = store.get(f"p{k}")
+        t = now - 40.0
+        while t < now:
+            rr = float(0.9 + rng.normal(scale=0.05))
+            t += rr
+            s.add_beat(NormalizedSample(person_id=f"p{k}", device_id=f"D{k}", source=Source.mqtt,
+                                        t_recv=t, hr_bpm=int(round(60.0 / rr)), rr_intervals=[rr], contact=True, seq=0))
+    sess = store.all()
+    w, hz, tau = proc["sync_window"], proc["resample_hz"], proc["hr_smooth_tau"]
+    grids = {s.profile.person_id: abstract.smoothed_hr_grid(s, now - w, now, hz, tau, art) for s in sess}
+    a = synchrony.compute(sess, now, cfg)
+    b = synchrony.compute(sess, now, cfg, hr_grids=grids)
+    assert np.array_equal(np.array(a["matrix"]), np.array(b["matrix"]))
+    assert np.array_equal(np.array(a["plv"]), np.array(b["plv"]))
+    assert a["cohesion"] == b["cohesion"]

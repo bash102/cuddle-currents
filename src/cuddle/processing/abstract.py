@@ -79,7 +79,14 @@ def windowed_hr_std(
     so zscore correlates noise and is unreliable — raw/level agreement is what to trust.
     """
     _, hr = smoothed_hr_grid(session, now - window, now, hz, tau, art)
-    finite = hr[np.isfinite(hr)]
+    return hr_std_from_grid(hr)
+
+
+def hr_std_from_grid(smooth: np.ndarray) -> float | None:
+    """SD (bpm) of a smoothed-HR grid's finite samples — the post-grid half of
+    ``windowed_hr_std``, split out so build_frame (which already computes that
+    grid and hands it to synchrony) computes the grid once, not twice."""
+    finite = smooth[np.isfinite(smooth)]
     if finite.size < 3:
         return None
     return float(np.std(finite))
@@ -101,8 +108,13 @@ def rmssd_delta(
     session: PersonSession, now: float, window: float, art: dict | None = None
 ) -> float | None:
     """RMSSD relative to the person's own baseline (%). Requires calibration."""
-    base = session.profile.calibration.hrv_baseline
-    cur = rolling_rmssd(session, now, window, art)
+    return rmssd_delta_from(rolling_rmssd(session, now, window, art), session.profile.calibration)
+
+
+def rmssd_delta_from(cur: float | None, calibration) -> float | None:
+    """RMSSD delta (%) from an already-computed RMSSD, split out so build_frame
+    computes RMSSD once (for the readout) and reuses it here, not twice."""
+    base = calibration.hrv_baseline
     if base is None or cur is None or base <= 0:
         return None
     return (cur - base) / base * 100.0

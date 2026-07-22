@@ -135,7 +135,12 @@ class Engine:
                 ota_url_base=self.ota_url_base,
             )
             await self._broadcast(self.latest)
-            await asyncio.sleep(period)
+            # Rate-compensate: sleep only the remainder of the period so the frame
+            # rate holds at frame_hz whenever a build takes < period. The old
+            # fixed sleep(period) made the real period build_time + period, i.e.
+            # always slower than configured (and much slower at scale).
+            elapsed = clock.now() - now
+            await asyncio.sleep(max(0.0, period - elapsed))
 
     def _scenario_name(self) -> str | None:
         return getattr(self.source, "scenario_name", None) or self.scenario
