@@ -50,3 +50,6 @@ CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
 # health gate. sdkconfig itself is gitignored (build output), so this is the
 # tracked source of truth that reproduces the setting on a fresh checkout.
 CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
+
+# Allow plain-HTTP OTA (POC: trusted LAN, no TLS). esp_https_ota refuses an http:// URL without this.
+CONFIG_ESP_HTTPS_OTA_ALLOW_HTTP=y
