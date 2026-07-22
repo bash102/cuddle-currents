@@ -43,6 +43,10 @@ _PINNED_STATES = (
     EnrollmentState.active,
 )
 _OFFLINE_PAYLOADS = (b"0", b"", b"false")
+# How long a gateway's last OTA phase stays on the Ops card before it's treated
+# as stale and dropped. Gateways only publish cuddle/<gw>/ota *during* an update,
+# so without this a terminal phase (ok/failed/rejected) would linger forever.
+_OTA_STATUS_TTL = 45.0
 
 
 class Orchestrator:
@@ -80,6 +84,7 @@ class Orchestrator:
         self._unserved: list[UnservedBand] = []
         self._last_rebalance_at: float | None = None
         self._ota_status: dict[str, OtaPhase] = {}
+        self._ota_status_at: dict[str, float] = {}  # gw -> clock.now() of last phase
 
         self._dirty_event = asyncio.Event()
         self._out_queue: asyncio.Queue = asyncio.Queue()
@@ -178,6 +183,16 @@ class Orchestrator:
             version=str(data.get("version", "")),
             detail=str(data.get("detail", "")),
         )
+        self._ota_status_at[gw] = clock.now()
+
+    def _fresh_ota(self, gw: str, now: float) -> OtaPhase | None:
+        """The gateway's last OTA phase, or None once it's older than
+        `_OTA_STATUS_TTL` (so a finished/failed update stops lingering)."""
+        phase = self._ota_status.get(gw)
+        ts = self._ota_status_at.get(gw)
+        if phase is None or ts is None or now - ts > _OTA_STATUS_TTL:
+            return None
+        return phase
 
     # ---- pinning ------------------------------------------------------------
 
@@ -294,6 +309,7 @@ class Orchestrator:
     # ---- state for build_frame -----------------------------------------------
 
     def gateway_states(self) -> list[GatewayState]:
+        now = clock.now()
         states = []
         for gw_id, view in self._world.gateways.items():
             connected = [
@@ -313,7 +329,7 @@ class Orchestrator:
                     connected=connected,
                     seen=seen,
                     version=view.version,
-                    ota=self._ota_status.get(gw_id),
+                    ota=self._fresh_ota(gw_id, now),
                 )
             )
         return states
@@ -322,7 +338,12 @@ class Orchestrator:
         return list(self._unserved)
 
     def ota_status(self) -> dict[str, OtaPhase]:
-        return dict(self._ota_status)
+        now = clock.now()
+        return {
+            gw: phase
+            for gw in self._ota_status
+            if (phase := self._fresh_ota(gw, now)) is not None
+        }
 
     # ---- OTA commands (operator-triggered; publishes immediately) -----------
 

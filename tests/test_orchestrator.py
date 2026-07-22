@@ -653,6 +653,24 @@ def test_ota_phase_message_ignores_malformed_json():
     assert orch.ota_status() == {}
 
 
+def test_ota_phase_expires_after_ttl(monkeypatch):
+    import cuddle.hub.orchestration.orchestrator as orch_mod
+
+    t = [1000.0]
+    monkeypatch.setattr(orch_mod.clock, "now", lambda: t[0])
+    orch = _orch()
+    orch._handle_message(
+        "cuddle/esp32-01/ota",
+        json.dumps({"phase": "ok", "version": "1.3.0", "detail": ""}).encode(),
+        now=t[0],
+    )
+    assert orch.ota_status()["esp32-01"].phase == "ok"  # fresh -> shown
+
+    t[0] += orch_mod._OTA_STATUS_TTL + 1.0  # a terminal phase must not linger forever
+    assert orch.ota_status() == {}
+    assert all(gw.ota is None for gw in orch.gateway_states())
+
+
 def test_gateway_states_includes_latest_ota_phase():
     orch = _orch()
     orch._handle_report("gw1", json.dumps(_payload()).encode(), now=100.0)
