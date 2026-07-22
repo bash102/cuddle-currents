@@ -84,8 +84,12 @@ an offline gateway is simply re-triggered when it returns.
 4. **OTA command handler:** subscribe `cuddle/control/ota`. On receipt:
    - If `version == running version` → publish `{"phase":"rejected","detail":"same version"}`, stop.
    - Else publish `start`, run `esp_https_ota` against `url` (streaming; the
-     component verifies the image header and, when provided, `sha256`), publish
-     `ok` on success then `esp_restart()`, or `failed` with the error on failure.
+     component validates the ESP-IDF image header + the image's own appended
+     SHA-256, and the bootloader re-verifies it on boot, so a corrupt download
+     fails to flash/boot and rolls back). The app-supplied `sha256` is carried
+     in the command for a possible future authenticity check but is **not**
+     verified firmware-side today. Publish `ok` on success then `esp_restart()`,
+     or `failed` with the error on failure.
    - OTA runs on the app CPU without blocking the MQTT keepalive longer than the
      library requires; a failed OTA leaves the running slot untouched.
 5. **Health gate / commit:** on boot, if the running partition state is

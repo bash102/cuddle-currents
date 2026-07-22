@@ -409,9 +409,12 @@ static void releaseDevice(const String& dev) {
 // ---- cuddle/control/ota ------------------------------------------------------
 // Pull+flash a new image. Blocks for the download (seconds on a LAN); PubSubClient
 // keepalive may lapse mid-download and reconnect afterward — acceptable because we
-// reboot on success and the pre-flight "start" phase is already published. sha256 is
-// carried for integrity; esp_https_ota validates the image header + writes atomically
-// to the inactive slot, then we reboot into it (pending-verify -> Task 2 gate).
+// reboot on success and the pre-flight "start" phase is already published. Corruption
+// is caught by ESP-IDF's own checks: esp_https_ota validates the image header + the
+// image's appended SHA-256, the bootloader re-verifies on boot, and a bad image rolls
+// back. The command's `sha256` is carried for a possible future authenticity check but
+// is NOT verified here today. Writes atomically to the inactive slot, then we reboot
+// into it (pending-verify -> Task 2 gate).
 static void runOta(const String& url, const String& version, const String& sha256) {
   const char* cur = esp_app_get_description()->version;
   if (version == String(cur)) {
