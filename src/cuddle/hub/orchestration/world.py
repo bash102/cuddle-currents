@@ -27,6 +27,7 @@ class GatewayView:
     connected: dict[str, int | None]  # dev -> rssi
     seen: dict[str, int | None]  # dev -> rssi (currently advertising)
     last_report_ts: float
+    version: str | None = None
 
 
 @dataclass
@@ -60,6 +61,7 @@ class WorldModel:
             connected=connected,
             seen=seen,
             last_report_ts=now,
+            version=payload.get("version"),
         )
 
         for dev, rssi in seen.items():

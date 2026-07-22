@@ -19,14 +19,17 @@ from cuddle.hub.orchestration.plan import Cmd, Pending
 from cuddle.hub.registry import SessionStore
 
 
-def _payload(capacity=4, mode="managed", connected=None, seen=None, ts=1_000):
-    return {
+def _payload(capacity=4, mode="managed", connected=None, seen=None, ts=1_000, version=None):
+    payload = {
         "capacity": capacity,
         "mode": mode,
         "connected": connected or [],
         "seen": seen or [],
         "ts": ts,
     }
+    if version is not None:
+        payload["version"] = version
+    return payload
 
 
 class _Recorder:
@@ -598,3 +601,67 @@ def test_orchestrator_builds_with_missing_orchestrator_config_section():
     # cfg["orchestrator"] doesn't exist yet (added in Task 9) -- must not KeyError.
     engine = _engine(orchestrate=True, config={})
     assert isinstance(engine.orchestrator, Orchestrator)
+
+
+# ---- OTA: version passthrough + publish_ota + phase tracking (Task 5) -----
+
+
+def test_gateway_states_carries_version():
+    orch = _orch()
+    orch._handle_report(
+        "gw1",
+        json.dumps(_payload(version="1.2.0")).encode(),
+        now=100.0,
+    )
+
+    gw = orch.gateway_states()[0]
+    assert gw.version == "1.2.0"
+
+
+def test_publish_ota_is_non_retained_control_command():
+    orch = _orch()
+
+    orch.publish_ota("http://host/firmware/1.3.0.bin", "1.3.0", "abc123")
+
+    topic, payload, qos, retain = orch._publish.calls[-1]
+    assert topic == "cuddle/control/ota"
+    assert retain is False
+    assert json.loads(payload) == {
+        "url": "http://host/firmware/1.3.0.bin",
+        "version": "1.3.0",
+        "sha256": "abc123",
+    }
+
+
+def test_ota_phase_message_updates_status():
+    orch = _orch()
+
+    orch._handle_message(
+        "cuddle/esp32-01/ota",
+        json.dumps({"phase": "start", "version": "1.3.0", "detail": "url"}).encode(),
+        now=1.0,
+    )
+
+    assert orch.ota_status()["esp32-01"].phase == "start"
+
+
+def test_ota_phase_message_ignores_malformed_json():
+    orch = _orch()
+
+    orch._handle_message("cuddle/esp32-01/ota", b"not json", now=1.0)
+
+    assert orch.ota_status() == {}
+
+
+def test_gateway_states_includes_latest_ota_phase():
+    orch = _orch()
+    orch._handle_report("gw1", json.dumps(_payload()).encode(), now=100.0)
+    orch._handle_message(
+        "cuddle/gw1/ota",
+        json.dumps({"phase": "downloading", "version": "1.3.0", "detail": ""}).encode(),
+        now=101.0,
+    )
+
+    gw = orch.gateway_states()[0]
+    assert gw.ota.phase == "downloading"
+    assert gw.ota.version == "1.3.0"

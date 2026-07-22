@@ -160,6 +160,14 @@ class SeenBand(BaseModel):
     rssi: int | None = None
 
 
+class OtaPhase(BaseModel):
+    """Latest OTA progress reported by a gateway on cuddle/<gw>/ota."""
+
+    phase: str  # start | downloading | ok | failed | rejected
+    version: str
+    detail: str = ""
+
+
 class GatewayState(BaseModel):
     """State of a single gateway in the orchestration network."""
 
@@ -169,6 +177,8 @@ class GatewayState(BaseModel):
     capacity: int = 0
     connected: list[ConnectedBand] = Field(default_factory=list)
     seen: list[SeenBand] = Field(default_factory=list)
+    version: str | None = None
+    ota: OtaPhase | None = None
 
 
 class UnservedBand(BaseModel):

@@ -27,6 +27,7 @@ from cuddle.core.models import (
     ConnectedBand,
     EnrollmentState,
     GatewayState,
+    OtaPhase,
     SeenBand,
     UnservedBand,
 )
@@ -78,6 +79,7 @@ class Orchestrator:
         self._manual_pins: set[str] = set()
         self._unserved: list[UnservedBand] = []
         self._last_rebalance_at: float | None = None
+        self._ota_status: dict[str, OtaPhase] = {}
 
         self._dirty_event = asyncio.Event()
         self._out_queue: asyncio.Queue = asyncio.Queue()
@@ -125,6 +127,8 @@ class Orchestrator:
             self._handle_report(gw, payload, now)
         elif kind == "online":
             self._handle_online(gw, payload, now)
+        elif kind == "ota":
+            self._handle_ota_phase(gw, payload)
 
     def _handle_report(self, gw: str, payload: bytes, now: float) -> None:
         try:
@@ -156,6 +160,24 @@ class Orchestrator:
         if payload in _OFFLINE_PAYLOADS:
             self._world.set_offline(gw, now)
             self._dirty_event.set()
+
+    def _handle_ota_phase(self, gw: str, payload: bytes) -> None:
+        """A gateway's OTA progress update (`<prefix>/<gw>/ota`), shaped
+        `{"phase", "version", "detail"}`. Stored per-gateway so `gateway_states()`
+        can surface the latest phase; malformed/missing-phase payloads are
+        dropped rather than raised, for the same reconnect-churn reason as
+        `_handle_report`."""
+        try:
+            data = json.loads(payload)
+        except (ValueError, TypeError):
+            return
+        if not isinstance(data, dict) or "phase" not in data:
+            return
+        self._ota_status[gw] = OtaPhase(
+            phase=str(data["phase"]),
+            version=str(data.get("version", "")),
+            detail=str(data.get("detail", "")),
+        )
 
     # ---- pinning ------------------------------------------------------------
 
@@ -290,12 +312,30 @@ class Orchestrator:
                     capacity=view.capacity,
                     connected=connected,
                     seen=seen,
+                    version=view.version,
+                    ota=self._ota_status.get(gw_id),
                 )
             )
         return states
 
     def unserved(self) -> list[UnservedBand]:
         return list(self._unserved)
+
+    def ota_status(self) -> dict[str, OtaPhase]:
+        return dict(self._ota_status)
+
+    # ---- OTA commands (operator-triggered; publishes immediately) -----------
+
+    def publish_ota(self, url: str, version: str, sha256: str) -> None:
+        """Publish a non-retained OTA command. Must stay non-retained -- a
+        retained `control/ota` would re-fire on every gateway reconnect and
+        drive a reflash loop."""
+        self._publish(
+            f"{self._prefix}/control/ota",
+            json.dumps({"url": url, "version": version, "sha256": sha256}).encode(),
+            qos=1,
+            retain=False,
+        )
 
     # ---- publishing (real send path; tests substitute a recorder) -----------
 
@@ -351,6 +391,7 @@ class Orchestrator:
                     await client.publish(online_topic, b"1", qos=1, retain=True)
                     await client.subscribe(f"{self._prefix}/+/report")
                     await client.subscribe(f"{self._prefix}/+/online")
+                    await client.subscribe(f"{self._prefix}/+/ota")
 
                     consumer = asyncio.create_task(self._consume(client))
                     publisher = asyncio.create_task(self._drain(client))

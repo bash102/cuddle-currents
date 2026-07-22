@@ -248,3 +248,21 @@ def test_first_seen_adv_reset_when_gateway_goes_offline():
     # advertising it anymore, so the clock clears.
     world.set_offline("gw1", now=101.0)
     assert world.first_seen_adv == {}
+
+
+def test_apply_report_carries_version():
+    w = WorldModel()
+    w.apply_report(
+        "gw1",
+        {"capacity": 6, "mode": "managed", "version": "1.2.0", "connected": [], "seen": []},
+        now=1.0,
+    )
+    assert w.gateways["gw1"].version == "1.2.0"
+
+
+def test_apply_report_version_absent_is_none():
+    w = WorldModel()
+    w.apply_report(
+        "gw1", {"capacity": 6, "mode": "managed", "connected": [], "seen": []}, now=1.0
+    )
+    assert w.gateways["gw1"].version is None
