@@ -396,3 +396,94 @@ def test_rebalance_release_is_reported_in_evictions():
     assert cmds == [Cmd(gw="gw1", action="release", dev="bandY")]
     assert unserved == []
     assert evictions == [("bandY", "gw1")]
+
+
+def test_freshly_advertising_band_waits_for_settle_window():
+    world = WorldModel()
+    world.apply_report(
+        "gw1", _payload(capacity=2, seen=[{"dev": "bandA", "rssi": -50}]), now=100.0
+    )
+    cfg = PlanCfg(settle_window=4.0)
+
+    # 1s after the first sighting: too soon. Hold off placing it -- and it is
+    # NOT "unserved" (it's simply still settling, distinct from no_capacity).
+    cmds, unserved, _ = plan(
+        world, pinned=set(), pending={}, cfg=cfg, now=101.0, allow_rebalance=False
+    )
+    assert cmds == []
+    assert unserved == []
+
+    # Once the settle window has elapsed, place it normally.
+    cmds, unserved, _ = plan(
+        world, pinned=set(), pending={}, cfg=cfg, now=104.0, allow_rebalance=False
+    )
+    assert cmds == [Cmd(gw="gw1", action="connect", dev="bandA")]
+    assert unserved == []
+
+
+def test_settle_window_lets_a_later_reporting_gateway_win_placement():
+    # The core of the feature: give every gateway a chance to report the band
+    # before choosing. gw1 sees it first (weakly); gw2 only reports it a
+    # second later, but stronger. With the settle window we wait and pick gw2.
+    world = WorldModel()
+    world.apply_report(
+        "gw1", _payload(capacity=1, seen=[{"dev": "bandA", "rssi": -70}]), now=100.0
+    )
+    cfg = PlanCfg(settle_window=4.0)
+
+    # Without the window we'd connect to gw1 right now; with it, we hold.
+    cmds, _, _ = plan(
+        world, pinned=set(), pending={}, cfg=cfg, now=101.0, allow_rebalance=False
+    )
+    assert cmds == []
+
+    # gw2 finally reports the same band, with a stronger signal.
+    world.apply_report(
+        "gw2", _payload(capacity=1, seen=[{"dev": "bandA", "rssi": -40}]), now=102.0
+    )
+
+    # Settle window (from first sighting at t=100) elapsed -> choose the
+    # strongest across BOTH gateways, i.e. gw2, which only appeared at t=102.
+    cmds, _, _ = plan(
+        world, pinned=set(), pending={}, cfg=cfg, now=104.0, allow_rebalance=False
+    )
+    assert cmds == [Cmd(gw="gw2", action="connect", dev="bandA")]
+
+
+def test_pinned_band_also_waits_for_settle_window_without_being_unserved():
+    world = WorldModel()
+    world.apply_report(
+        "gw1", _payload(capacity=2, seen=[{"dev": "bandA", "rssi": -50}]), now=100.0
+    )
+    cfg = PlanCfg(settle_window=4.0)
+
+    # A pinned (enrolled) band still settles before placement -- and while
+    # settling it is NOT reported unserved (it's advertising, just not long
+    # enough), distinct from the waiting_to_advertise / no_capacity reasons.
+    cmds, unserved, _ = plan(
+        world, pinned={"bandA"}, pending={}, cfg=cfg, now=101.0, allow_rebalance=False
+    )
+    assert cmds == []
+    assert unserved == []
+
+    cmds, _, _ = plan(
+        world, pinned={"bandA"}, pending={}, cfg=cfg, now=104.0, allow_rebalance=False
+    )
+    assert cmds == [Cmd(gw="gw1", action="connect", dev="bandA")]
+
+
+def test_settle_window_zero_places_immediately():
+    # Backward-compatible default: settle_window=0 -> no hold-off.
+    world = WorldModel()
+    world.apply_report(
+        "gw1", _payload(capacity=2, seen=[{"dev": "bandA", "rssi": -50}]), now=100.0
+    )
+    cmds, _, _ = plan(
+        world,
+        pinned=set(),
+        pending={},
+        cfg=PlanCfg(settle_window=0.0),
+        now=100.0,
+        allow_rebalance=False,
+    )
+    assert cmds == [Cmd(gw="gw1", action="connect", dev="bandA")]

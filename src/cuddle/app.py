@@ -27,6 +27,7 @@ _ORCHESTRATOR_TIMING_KEYS = (
     "coverage_ttl",
     "rebalance_cooldown",
     "evict_cooldown",
+    "settle_window",
 )
 
 

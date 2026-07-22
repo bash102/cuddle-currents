@@ -34,6 +34,12 @@ class WorldModel:
     gateways: dict[str, GatewayView] = field(default_factory=dict)
     # dev -> gw -> (rssi, ts)
     coverage: dict[str, dict[str, tuple[int | None, float]]] = field(default_factory=dict)
+    # dev -> time (s) it was first seen advertising in its current advertising
+    # spell. Stamped on the transition into `advertising()`, cleared the moment
+    # it connects or stops advertising. `plan()` holds off placing a band until
+    # `now - first_seen_adv >= settle_window`, giving every in-range gateway a
+    # chance to report its RSSI before the strongest is chosen.
+    first_seen_adv: dict[str, float] = field(default_factory=dict)
 
     def apply_report(self, gw: str, payload: dict, now: float) -> None:
         """Replace `gw`'s GatewayView with the contents of `payload` and
@@ -59,6 +65,20 @@ class WorldModel:
         for dev, rssi in seen.items():
             self.coverage.setdefault(dev, {})[gw] = (rssi, now)
 
+        self._refresh_adv_clock(now)
+
+    def _refresh_adv_clock(self, now: float) -> None:
+        """Keep `first_seen_adv` in step with the current advertising set:
+        stamp a band the first tick it appears advertising, and drop the stamp
+        once it stops advertising (connected, walked out of range, or its last
+        gateway went offline). Called after any change to gateway views."""
+        adv = self.advertising()
+        for dev in adv:
+            self.first_seen_adv.setdefault(dev, now)
+        for dev in list(self.first_seen_adv):
+            if dev not in adv:
+                del self.first_seen_adv[dev]
+
     def set_offline(self, gw: str, now: float) -> None:
         """Mark `gw` offline and clear its connected/seen sets.
 
@@ -72,6 +92,7 @@ class WorldModel:
         view.online = False
         view.connected = {}
         view.seen = {}
+        self._refresh_adv_clock(now)
 
     def holder_of(self, dev: str) -> str | None:
         """Return the id of the gateway currently holding `dev` connected,

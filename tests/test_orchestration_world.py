@@ -206,3 +206,45 @@ def test_advertising_excludes_dev_connected_on_a_different_gateway_than_seen_on(
 
     assert "AA:01" not in ads
     assert ads["BB:02"] == {"gw1": -70}
+
+
+def test_first_seen_adv_stamped_once_and_cleared_on_connect():
+    world = WorldModel()
+
+    # First sighting stamps the advertising clock at that report's `now`.
+    world.apply_report("gw1", _payload(seen=[{"dev": "bandA", "rssi": -60}]), now=100.0)
+    assert world.first_seen_adv == {"bandA": 100.0}
+
+    # A later report (new `now`, even stronger rssi, or a second gateway) does
+    # NOT move the stamp -- the settle window measures dwell from first
+    # appearance, so all gateways get a chance to report before placement.
+    world.apply_report("gw2", _payload(seen=[{"dev": "bandA", "rssi": -40}]), now=103.0)
+    assert world.first_seen_adv == {"bandA": 100.0}
+
+    # Once the band connects it stops advertising -> stamp dropped, so a future
+    # reconnect re-settles from scratch rather than reusing a stale clock.
+    world.apply_report("gw1", _payload(connected=[{"dev": "bandA", "rssi": -55}]), now=105.0)
+    world.apply_report("gw2", _payload(seen=[]), now=105.0)
+    assert world.first_seen_adv == {}
+
+
+def test_first_seen_adv_cleared_when_band_stops_advertising():
+    world = WorldModel()
+    world.apply_report("gw1", _payload(seen=[{"dev": "bandA", "rssi": -60}]), now=100.0)
+    assert "bandA" in world.first_seen_adv
+
+    # The band drops out of `seen` without connecting (walked out of range) ->
+    # its clock resets so a reappearance must settle again.
+    world.apply_report("gw1", _payload(seen=[]), now=102.0)
+    assert world.first_seen_adv == {}
+
+
+def test_first_seen_adv_reset_when_gateway_goes_offline():
+    world = WorldModel()
+    world.apply_report("gw1", _payload(seen=[{"dev": "bandA", "rssi": -60}]), now=100.0)
+    assert "bandA" in world.first_seen_adv
+
+    # The only gateway that saw the band drops off the broker -> no gateway is
+    # advertising it anymore, so the clock clears.
+    world.set_offline("gw1", now=101.0)
+    assert world.first_seen_adv == {}

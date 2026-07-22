@@ -40,6 +40,11 @@ class _Recorder:
 
 
 def _orch(store=None, **kw):
+    # Default the settle window off so each test isolates the behavior it
+    # targets (pending guard, eviction, unserved, ...) at a single fixed
+    # timestamp; the settle-before-connect hold-off is covered directly in
+    # test_orchestration_plan.py / test_orchestration_world.py.
+    kw.setdefault("settle_window", 0.0)
     orch = Orchestrator(store or SessionStore(), **kw)
     orch._publish = _Recorder()
     return orch
