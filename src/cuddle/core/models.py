@@ -151,9 +151,12 @@ class ConnectedBand(BaseModel):
 
 
 class SeenBand(BaseModel):
-    """A band visible to a gateway but not yet connected."""
+    """A band visible to a gateway but not yet connected. `person_id` is set
+    when the band's address is already enrolled, so the UI can show whose band
+    is nearby (advertising) rather than a bare MAC."""
 
     dev: str
+    person_id: str | None = None
     rssi: int | None = None
 
 

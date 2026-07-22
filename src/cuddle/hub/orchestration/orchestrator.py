@@ -276,7 +276,10 @@ class Orchestrator:
                 ConnectedBand(dev=dev, person_id=self._store.person_for_device(dev), rssi=rssi)
                 for dev, rssi in view.connected.items()
             ]
-            seen = [SeenBand(dev=dev, rssi=rssi) for dev, rssi in view.seen.items()]
+            seen = [
+                SeenBand(dev=dev, person_id=self._store.person_for_device(dev), rssi=rssi)
+                for dev, rssi in view.seen.items()
+            ]
             states.append(
                 GatewayState(
                     id=gw_id,

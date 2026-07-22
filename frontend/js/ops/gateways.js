@@ -161,8 +161,11 @@ function makeSeenRow(dev) {
   return { root: row, dev: row.querySelector(".banddev"), rssi: row.querySelector(".bandrssi"), sel };
 }
 
-function updateSeenRow(node, band, gwId, allGatewayIds) {
-  node.dev.textContent = band.dev;
+function updateSeenRow(node, band, gwId, allGatewayIds, people) {
+  // Show the enrolled person's name when this MAC is already registered, else
+  // the bare MAC (bandLabel handles the fallback). Keep the MAC on hover.
+  node.dev.textContent = bandLabel(band.dev, band.person_id, people);
+  node.dev.title = band.dev;
   node.rssi.textContent = band.rssi != null ? `${band.rssi} dBm` : "—";
   syncSelect(node.sel, [
     { value: "", label: "connect →" },
@@ -275,7 +278,7 @@ export function renderGateways(frame) {
     );
     reconcileRows(
       node.seenWrap, node.seenEmpty, node.seenRows, gw.seen,
-      makeSeenRow, (n, b) => updateSeenRow(n, b, gw.id, allGatewayIds),
+      makeSeenRow, (n, b) => updateSeenRow(n, b, gw.id, allGatewayIds, people),
     );
   }
   for (const [id, node] of gatewayNodes) {
