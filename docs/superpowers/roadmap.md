@@ -154,13 +154,17 @@ Existing README roadmap item — durable session storage/history beyond flat cap
 
 Small, independent polish items (no dependencies; pick up any time):
 
-- **Gateway naming: assign a human-friendly name to each gateway.** Gateways are identified
-  today by their auto-unique id (e.g. `esp32-01-a172e0`), which is opaque on the Ops roster.
-  Let an operator assign a friendly label ("Living Room", "Kitchen") shown wherever a gateway
-  appears (Ops roster, unserved callout). Open design question: where the name lives — an
-  app-side id→name map (simplest; survives reflash, no firmware change) vs. persisted in the
-  gateway's NVS and surfaced in its `report` payload (travels with the hardware). Lean app-side
-  first.
+- **Gateway naming: assign a human-friendly name to each gateway — DONE** (client-side).
+  An operator can click a gateway's name (or the ✎ button) on the Ops roster to set a friendly
+  alias ("Living Room") edited in place; it's stored in `localStorage` keyed by gateway id, so
+  it's Ops-UI-only — never sent to the backend or the gateway, and the canonical id stays
+  authoritative (shown on hover). Chose the app-side path over NVS-in-`report` for zero
+  wire/firmware cost. *Remaining (optional):* per-browser only — a shared/persisted mapping
+  would need a StateFrame field + REST endpoint.
+- **Seen-list name resolution: case-insensitive — DONE.** `SeenBand` already carried
+  `person_id` (commit `4ae6df5`); `person_for_device` now matches addresses case-insensitively
+  so an enrolled band resolves to its person in the seen list even when the MAC casing differs
+  between sources (firmware NimBLE `toString()` is lowercase).
 - **Ops enroll: confirm on Enter.** Pressing Enter in the enroll name field should confirm
   the name→band enrollment (currently requires clicking the button).
 - **Ops HR charts: labeled axes.** Add x (time) and y (bpm) axes to the per-person HR charts.
