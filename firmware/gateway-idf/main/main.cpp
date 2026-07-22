@@ -410,14 +410,27 @@ static void resolveDuplicateHolds() {
 
 // Tiny hand-rolled extractor for {"action":"...","dev":"..."} — matches the
 // rest of this file's approach to JSON (String concatenation, no library).
+// Tolerant of the optional whitespace a standard JSON encoder inserts after
+// ':' (Python's json.dumps emits `"action": "connect"` with a space), so a
+// spaced payload parses identically to a compact one. A strict `"key":"`
+// match silently drops every spaced cmd -> empty action.
+static bool isJsonWs(char c) { return c == ' ' || c == '\t' || c == '\n' || c == '\r'; }
+
 static String jsonExtract(const String& json, const String& key) {
-  String pat = "\"" + key + "\":\"";
+  String pat = "\"" + key + "\"";
   int idx = json.indexOf(pat);
   if (idx < 0) return String();
-  idx += pat.length();
-  int end = json.indexOf('"', idx);
+  int i = idx + pat.length();
+  const int n = json.length();
+  while (i < n && isJsonWs(json[i])) i++;          // ws before ':'
+  if (i >= n || json[i] != ':') return String();
+  i++;
+  while (i < n && isJsonWs(json[i])) i++;          // ws before opening quote
+  if (i >= n || json[i] != '"') return String();
+  i++;
+  int end = json.indexOf('"', i);
   if (end < 0) return String();
-  return json.substring(idx, end);
+  return json.substring(i, end);
 }
 
 // ---- config + provisioning -------------------------------------------------
