@@ -771,7 +771,11 @@ void setup() {
 
 void loop() {
   updateLed();  // first, so the LED still updates during the Wi-Fi-down early-return below
-  if (WiFi.status() != WL_CONNECTED) { WiFi.reconnect(); delay(500); return; }
+  // A WiFi drop breaks the OTA health streak: this early-return skips the
+  // health-gate block below, so reset g_mqttUpSince here or a flapping link
+  // would carry a stale pre-outage timestamp across the outage and could
+  // falsely mark a bad image healthy.
+  if (WiFi.status() != WL_CONNECTED) { g_mqttUpSince = 0; WiFi.reconnect(); delay(500); return; }
   ensureMqtt();
   mqtt.loop();
 
