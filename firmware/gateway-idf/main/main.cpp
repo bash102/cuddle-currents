@@ -484,12 +484,14 @@ static String jsonExtract(const String& json, const String& key) {
 
 // ---- config + provisioning -------------------------------------------------
 
-// Last 24 bits of the chip's factory MAC as hex — a stable per-board suffix so a fleet
-// flashed from ONE image is auto-unique (MQTT topics key on <gw>, so two identically-named
-// gateways would collide on the broker).
+// A stable per-board hex suffix so a fleet flashed from ONE image is auto-unique
+// (MQTT topics key on <gw>, so two identically-named gateways collide on the broker).
+// ESP.getEfuseMac() returns the 48-bit MAC byte-reversed, so its LOW 24 bits are the
+// OUI (vendor prefix, IDENTICAL across a batch) — using those made every board suffix
+// the same. The device-unique half is the HIGH 24 bits: (mac >> 24) & 0xFFFFFF.
 static String macSuffix() {
   char buf[8];
-  snprintf(buf, sizeof(buf), "%06lx", (unsigned long)(ESP.getEfuseMac() & 0xFFFFFF));
+  snprintf(buf, sizeof(buf), "%06lx", (unsigned long)((ESP.getEfuseMac() >> 24) & 0xFFFFFF));
   return String(buf);
 }
 
