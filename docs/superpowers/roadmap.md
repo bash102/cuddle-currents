@@ -165,11 +165,12 @@ Small, independent polish items (no dependencies; pick up any time):
   `person_id` (commit `4ae6df5`); `person_for_device` now matches addresses case-insensitively
   so an enrolled band resolves to its person in the seen list even when the MAC casing differs
   between sources (firmware NimBLE `toString()` is lowercase).
-- **Ops enroll: confirm on Enter.** Pressing Enter in the enroll name field should confirm
-  the name→band enrollment (currently requires clicking the button).
-- **Ops HR charts: labeled axes.** Add x (time) and y (bpm) axes to the per-person HR charts.
-- **Ops: remove the orbiting circle.** Drop the orbiting-circle element/animation on the Ops
-  page.
+- **Ops enroll: confirm on Enter — DONE.** Pressing Enter in the enroll name field confirms
+  the name→band enrollment (same as clicking Enroll).
+- **Ops HR charts: labeled axes — DONE.** Per-person HR trace now has a y-axis (bpm min/max)
+  and an x-axis (time →, oldest beat left → newest right).
+- **Ops: remove the orbiting circle — DONE.** Dropped the per-person phase dial (the dot
+  orbiting a circle) from the Ops cards.
 - **Firmware: RGB status LED — DONE.** Onboard NeoPixel (GPIO48, `rgbLedWrite`, intentionally
   dim — channels capped at 24) shows link/mode/load: yellow (Wi-Fi connecting) · blue (portal) ·
   orange (MQTT down) · green (online/opportunistic, brighter with band count) · teal (managed).
