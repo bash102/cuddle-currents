@@ -10,15 +10,19 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+from pathlib import Path
 
 from cuddle.core import clock
 from cuddle.core.config import load_config
 from cuddle.core.models import Source, StateFrame
+from cuddle.hub import ota as ota_helpers
 from cuddle.hub.enrollment import EnrollmentManager
 from cuddle.hub.ingest import IngestHub
 from cuddle.hub.orchestration.orchestrator import Orchestrator
 from cuddle.hub.registry import SessionStore
 from cuddle.processing import frame as frame_builder
+
+FIRMWARE_DIR = Path(__file__).resolve().parents[2] / "firmware_ota"
 
 _ORCHESTRATOR_TIMING_KEYS = (
     "report_debounce",
@@ -75,6 +79,31 @@ class Engine:
         else:
             self.orchestrator = None
 
+        # Firmware storage + the LAN address gateways can reach it at (OTA).
+        # `firmware_dir` is runtime state (gitignored), created eagerly so the
+        # first `/api/ota` upload doesn't race directory creation.
+        self.firmware_dir = FIRMWARE_DIR
+        self.firmware_dir.mkdir(parents=True, exist_ok=True)
+        self.ota_url_base = self._detect_ota_url_base()
+
+    def _detect_ota_url_base(self) -> str | None:
+        # `cfg` may be a partial dict handed straight to a test (bypassing
+        # load_config's defaults) -- fall back to the same defaults
+        # core/config.py uses rather than KeyError on a missing section.
+        mq = self.cfg.get("mqtt", {})
+        transport = self.cfg.get("transport", {})
+        broker = mq.get("broker", "127.0.0.1")
+        broker_port = mq.get("port", 1883)
+        transport_host = transport.get("host", "127.0.0.1")
+        transport_port = transport.get("port", 8770)
+
+        host = ota_helpers.detect_lan_ip((broker, broker_port))
+        if host is None and ota_helpers.is_routable_host(transport_host):
+            host = transport_host
+        if host is None:
+            return None
+        return f"http://{host}:{transport_port}"
+
     async def start(self) -> None:
         self.enrollment.load()
         self.enrollment.rebind_source()
@@ -110,6 +139,7 @@ class Engine:
                 scenario=self._scenario_name(),
                 source_type=self.source_type,
                 orchestrator=self.orchestrator,
+                ota_url_base=self.ota_url_base,
             )
             await self._broadcast(self.latest)
             await asyncio.sleep(period)

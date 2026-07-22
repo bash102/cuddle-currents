@@ -200,3 +200,4 @@ class StateFrame(BaseModel):
     source: Source = Source.sim
     gateways: list[GatewayState] = Field(default_factory=list)
     unserved: list[UnservedBand] = Field(default_factory=list)
+    ota_url_base: str | None = None

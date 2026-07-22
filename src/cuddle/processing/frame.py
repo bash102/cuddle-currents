@@ -41,6 +41,7 @@ def build_frame(
     scenario: str | None,
     source_type: Source,
     orchestrator=None,
+    ota_url_base: str | None = None,
 ) -> StateFrame:
     source_states = source.connection_states
     proc = cfg["processing"]
@@ -101,6 +102,7 @@ def build_frame(
         source=source_type,
         gateways=gateways,
         unserved=unserved_bands,
+        ota_url_base=ota_url_base,
     )
 
 

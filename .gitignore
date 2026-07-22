@@ -18,6 +18,9 @@ captures/*.json
 # Runtime enrollment store (written by the app; devices.yaml is the tracked template)
 config/enrollment.yaml
 
+# Runtime firmware storage for OTA uploads
+firmware_ota/
+
 # Editor / OS
 .DS_Store
 .vscode/
