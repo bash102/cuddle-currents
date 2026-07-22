@@ -33,18 +33,75 @@ Run 2+ gateways with overlapping coverage. Verify in practice: band **handoff/ro
 across gateways (identity is the band, so `person_id` continuity should hold), and that
 opportunistic capacity self-balances.
 
-### 3. Level B — app-orchestrated assignment  *(own spec; the big one for 30-person scale)*
-The PoC ships level A (opportunistic + per-gateway cap). Level B gives the app a global view
-and control:
-- **`discovery` topic** — gateways report *seen-but-unconnected* bands so the app knows what
-  is available network-wide (not just what's already connected).
-- **`cmd` topic** — app assigns bands to specific gateways; firmware obeys.
-- **assignment algorithm** — balance load across gateways, **solve the unserved-band edge
-  case** (a band in range of only full gateways), prefer strongest RSSI, add stickiness to
-  limit handoff churn.
-- **Ops UI** — gateway roster and which band is on which gateway.
+### 3. Level B — app-orchestrated assignment  *(done — app side + firmware code; on-hardware validation pending — [`specs/2026-07-20-level-b-orchestration-design.md`](specs/2026-07-20-level-b-orchestration-design.md))*
+The PoC shipped level A (opportunistic + per-gateway cap). Level B gives the app a global view
+and full authority (stability-first placement, auto-revert on orchestrator death). Shipped:
+- **`hub/orchestration/`** (`world.py` world-model + coverage memory, `plan.py` pure
+  stability-first planner, `orchestrator.py` async MQTT service) — enabled with
+  `cuddle --source mqtt --orchestrate` (or `orchestrator.enabled` in `app.yaml`).
+- **Additive MQTT contract**: `cuddle/<gw>/report` (retained: capacity/mode/connected/seen),
+  `cuddle/<gw>/cmd` (connect/release), `cuddle/control/mode` (managed|opportunistic,
+  retained), `cuddle/control/online` (retained, orchestrator LWT). Level A topics
+  (`hr`/`status`/`online`) are unchanged.
+- **Stability-first placement** — connected bands aren't moved except a bounded,
+  cooldown-guarded unserved-band rebalance; enrolled bands (assigned/baselining/active) are
+  pinned (force-connected immediately, protected from rebalance). Auto-reverts every gateway
+  to level A (opportunistic) if the orchestrator dies.
+- **Ops UI + REST** — `StateFrame` gained `gateways[]`/`unserved[]`; Ops gained a gateway
+  roster, an unserved-band callout, a mode toggle, and manual override
+  (`/api/orchestrator/mode`, `/connect`, `/release`, `/pin`).
+- **Firmware** (`firmware/gateway-idf`) — managed mode (report + cmd + transition-based
+  auto-revert), boot-default opportunistic. See that directory's README.
+
+**Results (Tasks 10-11, mock multi-gateway e2e)**: all servable bands connect; the
+unserved-band case (a band in range of only full gateways) gets served after a rebalance with
+**no cmd thrash** (fixed via an eviction cooldown — see `plan.py`); enrollment force-connect
+pins+connects a chosen band; killing the app flips every gateway back to opportunistic
+(auto-revert), confirmed via the mock harness. **Firmware on-hardware validation is still
+pending** — a separate hardware step (flash real ESP32 gateways, run against a live
+orchestrator) has not yet been done; do not treat firmware managed mode as hardware-validated.
+
+**Known limitation**: a band connected stably for longer than `coverage_ttl` (60s) won't be
+auto-rebalanced — its cross-gateway coverage memory (RSSI at other gateways) ages out because
+a connected BLE band stops re-advertising, so the orchestrator can't refresh it. Rather than
+rebalance on stale RSSI, the orchestrator conservatively surfaces the *other* unserved band as
+unserved instead of moving the long-connected one. Operator can manually place via Ops
+(`/api/orchestrator/connect` or `pin`).
 
 Additive to the PoC contract (new topics), not a rewrite.
+
+#### Level B — real-hardware validation checklist (highest-value next step)
+
+Everything above is **mock-validated**; the single-ESP32 hardware test only exercised the
+*communication* (report / mode switch / cmd received / auto-revert) with **no bands**. One
+2-gateway session with real bands flips most unknowns into knowns. Setup: 2 IDF gateways with
+**distinct gateway ids** (each provisioned via the portal — they collide on MQTT topics if both
+default to `esp32-01`), the broker, `cuddle --source mqtt --orchestrate`, the **Ops page open in
+a browser**, and a handful of bands.
+
+- [ ] Both gateways appear in the Ops roster with correct `capacity`/`mode`; boot opportunistic,
+      flip to managed when the orchestrator starts.
+- [ ] Bands get placed via `cmd` (real `connect`), HR flows, and the roster shows each band on
+      the right gateway. Confirm the LED goes green→brighter as bands land (teal in managed).
+- [ ] **Real RSSI noise**: watch initial placement for flapping / odd strongest-gateway picks
+      (real RSSI swings ±10–20 dBm; the mock used fixed values).
+- [ ] Manual override in the browser: force-connect a `seen` band to a chosen gateway;
+      force-release; pin/unpin. Confirm Release actually sticks (the pin bug fixed in final review).
+- [ ] Enrollment: assign a band → it's pinned → force-connected → baselines → active, without a
+      rebalance ever interrupting it.
+- [ ] **Roaming/handoff**: carry a band out of one gateway's range → it drops → re-placed on
+      another gateway with `person_id` continuity (history/matrix position intact).
+- [ ] **Unserved-band rebalance** with a real coverage-overlap topology (mirror the mock's
+      band-only-reachable-via-a-full-gateway case): confirm it's served via one clean eviction,
+      no `cmd` thrash.
+- [ ] **60s coverage limitation**: let bands sit connected >1 min, then introduce an unserved
+      band — observe whether it's rebalanced in or (expected) surfaced as unserved. Decide if the
+      conservative behavior is acceptable or needs the aggressive-rebalance change.
+- [ ] **App-death auto-revert**: kill the app → both gateways revert to opportunistic within
+      ~15s (LED yellow/green per Level A) → bands stay served. Restart → they return to managed.
+- [ ] Load/robustness: with many `seen` advertisers, confirm `report` still publishes (buffer
+      sizing) and no MQTT churn; check the LED never sticks on a stale state.
+- [ ] Record results here + in the design spec; promote confirmed items out of "pending".
 
 ### 4. Broker security
 TLS, credentials, and ACLs. The PoC assumes a trusted local network; real deployments need
@@ -92,3 +149,38 @@ Existing README roadmap item — durable session storage/history beyond flat cap
   the app. Fixed by level B (or more gateways / better coverage).
 - **Handoff churn**: without stickiness, a band on the edge of two gateways could flap
   between them. Addressed by the level B assignment algorithm.
+
+## Backlog — Ops UI & firmware polish
+
+Small, independent polish items (no dependencies; pick up any time):
+
+- **Gateway naming: assign a human-friendly name to each gateway — DONE** (client-side).
+  An operator can click a gateway's name (or the ✎ button) on the Ops roster to set a friendly
+  alias ("Living Room") edited in place; it's stored in `localStorage` keyed by gateway id, so
+  it's Ops-UI-only — never sent to the backend or the gateway, and the canonical id stays
+  authoritative (shown on hover). Chose the app-side path over NVS-in-`report` for zero
+  wire/firmware cost. *Remaining (optional):* per-browser only — a shared/persisted mapping
+  would need a StateFrame field + REST endpoint.
+- **Seen-list name resolution: case-insensitive — DONE.** `SeenBand` already carried
+  `person_id` (commit `4ae6df5`); `person_for_device` now matches addresses case-insensitively
+  so an enrolled band resolves to its person in the seen list even when the MAC casing differs
+  between sources (firmware NimBLE `toString()` is lowercase).
+- **Ops enroll: confirm on Enter.** Pressing Enter in the enroll name field should confirm
+  the name→band enrollment (currently requires clicking the button).
+- **Ops HR charts: labeled axes.** Add x (time) and y (bpm) axes to the per-person HR charts.
+- **Ops: remove the orbiting circle.** Drop the orbiting-circle element/animation on the Ops
+  page.
+- **Firmware: RGB status LED — DONE.** Onboard NeoPixel (GPIO48, `rgbLedWrite`, intentionally
+  dim — channels capped at 24) shows link/mode/load: yellow (Wi-Fi connecting) · blue (portal) ·
+  orange (MQTT down) · green (online/opportunistic, brighter with band count) · teal (managed).
+  `updateLed()` runs at the top of `loop()`, main task only.
+- **Firmware: fleet bring-up — DONE.** Gateway id auto-appends a per-chip MAC suffix (one image
+  → unique per board, e.g. `esp32-01-a172e0`), and optional compile-time `WIFI_SSID`/`WIFI_PASS`
+  in `secrets.h` let a freshly-flashed gateway auto-join with no captive portal.
+- **Firmware: OTA updates.** — **DONE** (Tasks 5–7). Fleet-wide over-the-air updates via
+  MQTT-triggered pull: the app posts a command on `cuddle/control/ota` with an image URL;
+  gateways fetch and self-update in dual-slot OTA with auto-rollback if the new image fails
+  to reach MQTT within ~60s. See `firmware/gateway-idf/README.md` for usage. Follow-up items
+  (not blocking): **staggered/rolling rollout** (limit concurrent updates to avoid overload),
+  **per-gateway targeting** (selective fleet updates), and **HTTPS + signed images** (trusted
+  LAN only; TLS/signing deferred for Phase 2).

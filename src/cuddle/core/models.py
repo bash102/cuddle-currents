@@ -142,6 +142,53 @@ class SynchronyState(BaseModel):
     mode: str = "zscore"  # raw | zscore | baseline_delta
 
 
+class ConnectedBand(BaseModel):
+    """A band currently connected to a gateway."""
+
+    dev: str
+    person_id: str | None = None
+    rssi: int | None = None
+
+
+class SeenBand(BaseModel):
+    """A band visible to a gateway but not yet connected. `person_id` is set
+    when the band's address is already enrolled, so the UI can show whose band
+    is nearby (advertising) rather than a bare MAC."""
+
+    dev: str
+    person_id: str | None = None
+    rssi: int | None = None
+
+
+class OtaPhase(BaseModel):
+    """Latest OTA progress reported by a gateway on cuddle/<gw>/ota."""
+
+    phase: str  # start | downloading | ok | failed | rejected
+    version: str
+    detail: str = ""
+
+
+class GatewayState(BaseModel):
+    """State of a single gateway in the orchestration network."""
+
+    id: str
+    online: bool = True
+    mode: str = "opportunistic"  # "managed" | "opportunistic"
+    capacity: int = 0
+    connected: list[ConnectedBand] = Field(default_factory=list)
+    seen: list[SeenBand] = Field(default_factory=list)
+    version: str | None = None
+    ota: OtaPhase | None = None
+
+
+class UnservedBand(BaseModel):
+    """A band that cannot be served by any gateway."""
+
+    dev: str
+    rssi: int | None = None
+    reason: str  # "no_capacity" | "waiting_to_advertise"
+
+
 class StateFrame(BaseModel):
     """The broadcast contract. Both frontends render off this and nothing else."""
 
@@ -151,3 +198,6 @@ class StateFrame(BaseModel):
     synchrony: SynchronyState = Field(default_factory=SynchronyState)
     scenario: str | None = None
     source: Source = Source.sim
+    gateways: list[GatewayState] = Field(default_factory=list)
+    unserved: list[UnservedBand] = Field(default_factory=list)
+    ota_url_base: str | None = None

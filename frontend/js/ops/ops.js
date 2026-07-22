@@ -5,6 +5,7 @@
 import { subscribe, isConnected } from "../store.js";
 import { post } from "../ws.js";
 import { drawGlyph } from "../shapes.js";
+import { initGateways, renderGateways } from "./gateways.js";
 
 // Theme colors resolved from theme.css (with fallbacks so there's no load race).
 function cssVar(n) {
@@ -395,7 +396,9 @@ function render(frame) {
   reconcilePeople(roster);
   reconcileDevices(frame.unassigned || []);
   drawHeatmap(frame.synchrony);
+  renderGateways(frame);
 }
 
 initControls();
+initGateways();
 subscribe(render);

@@ -61,6 +61,15 @@ _DEFAULTS: dict[str, Any] = {
         "topic_prefix": "cuddle",
         "max_connections": 4,  # per-gateway cap (gateway/firmware hint; validated on hardware)
     },
+    "orchestrator": {
+        "enabled": False,
+        "report_debounce": 0.5,
+        "reconcile_interval": 5.0,
+        "pending_ttl": 8.0,
+        "coverage_ttl": 60.0,
+        "rebalance_cooldown": 10.0,
+        "evict_cooldown": 10.0,
+    },
 }
 
 

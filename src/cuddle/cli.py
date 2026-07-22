@@ -21,6 +21,15 @@ from cuddle.core.models import Source
 def build_engine(args) -> Engine:
     cfg = load_config(args.config)
 
+    # Fold --host/--port into the transport config BEFORE constructing the
+    # Engine, so its OTA URL detection sees the SAME bind host uvicorn will use
+    # (main() binds cfg["transport"]["host"]). Without this the Engine only ever
+    # saw the app.yaml default and could never detect a LAN-reachable OTA URL.
+    if args.host is not None:
+        cfg["transport"]["host"] = args.host
+    if args.port is not None:
+        cfg["transport"]["port"] = args.port
+
     if args.source == "sim":
         from cuddle.sources.sim_source import SimulatorSource
 
@@ -70,14 +79,19 @@ def build_engine(args) -> Engine:
     else:  # pragma: no cover
         raise SystemExit(f"unknown source: {args.source}")
 
-    return Engine(
-        source,
-        source_type=source_type,
-        scenario=args.scenario if args.source == "sim" else None,
-        config=cfg,
-        enrollment_path=args.enrollment,
-        capture_path=args.record,
-    )
+    orchestrate = args.orchestrate or cfg["orchestrator"]["enabled"]
+    try:
+        return Engine(
+            source,
+            source_type=source_type,
+            scenario=args.scenario if args.source == "sim" else None,
+            config=cfg,
+            enrollment_path=args.enrollment,
+            capture_path=args.record,
+            orchestrate=orchestrate,
+        )
+    except ValueError:
+        raise SystemExit("--orchestrate requires --source mqtt") from None
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -98,6 +112,8 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--host", default=None)
     ap.add_argument("--port", type=int, default=None)
     ap.add_argument("--broker", help="MQTT broker host:port (with --source mqtt)")
+    ap.add_argument("--orchestrate", action="store_true",
+                    help="run BLE->WiFi gateway orchestration (requires --source mqtt)")
     return ap
 
 

@@ -14,10 +14,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, File, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+
+from cuddle.hub import ota as ota_helpers
 
 FRONTEND = Path(__file__).resolve().parents[3] / "frontend"
 
@@ -48,6 +50,24 @@ class ModeBody(BaseModel):
 
 class ScenarioBody(BaseModel):
     scenario: str
+
+
+class OrchModeBody(BaseModel):
+    mode: str
+
+
+class OrchConnectBody(BaseModel):
+    dev: str
+    gw: str
+
+
+class OrchReleaseBody(BaseModel):
+    dev: str
+
+
+class OrchPinBody(BaseModel):
+    dev: str
+    pinned: bool
 
 
 def create_app(engine) -> FastAPI:
@@ -148,5 +168,79 @@ def create_app(engine) -> FastAPI:
         except ValueError as e:
             return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
         return JSONResponse({"ok": True, "scenario": body.scenario})
+
+    @app.post("/api/orchestrator/mode")
+    async def orch_mode(body: OrchModeBody) -> JSONResponse:
+        try:
+            engine.orch_set_mode(body.mode)
+        except ValueError as e:
+            return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
+        return JSONResponse({"ok": True})
+
+    @app.post("/api/orchestrator/connect")
+    async def orch_connect(body: OrchConnectBody) -> JSONResponse:
+        try:
+            engine.orch_connect(body.dev, body.gw)
+        except ValueError as e:
+            return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
+        return JSONResponse({"ok": True})
+
+    @app.post("/api/orchestrator/release")
+    async def orch_release(body: OrchReleaseBody) -> JSONResponse:
+        try:
+            engine.orch_release(body.dev)
+        except ValueError as e:
+            return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
+        return JSONResponse({"ok": True})
+
+    @app.post("/api/orchestrator/pin")
+    async def orch_pin(body: OrchPinBody) -> JSONResponse:
+        try:
+            engine.orch_pin(body.dev, body.pinned)
+        except ValueError as e:
+            return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
+        return JSONResponse({"ok": True})
+
+    # ---- OTA --------------------------------------------------------------
+
+    @app.post("/api/ota")
+    async def api_ota(bin: UploadFile = File(...)) -> JSONResponse:
+        orch = engine.orchestrator
+        if orch is None:
+            raise HTTPException(503, "OTA requires the orchestrator (run with --orchestrate)")
+        if engine.ota_url_base is None:
+            raise HTTPException(
+                409,
+                "app is not serving on a LAN address; start with --host 0.0.0.0 so "
+                "gateways can reach the firmware image",
+            )
+        data = await bin.read()
+        try:
+            version = ota_helpers.parse_firmware_version(data)
+            name = ota_helpers.safe_firmware_name(version)
+        except ValueError as e:
+            raise HTTPException(400, f"not a valid gateway firmware image: {e}") from e
+        sha = ota_helpers.sha256_hex(data)
+        path = engine.firmware_dir / name
+        path.write_bytes(data)
+        url = f"{engine.ota_url_base}/firmware/{name}"
+        orch.publish_ota(url, version, sha)
+        gateways = [gw.id for gw in orch.gateway_states()]
+        return JSONResponse({"version": version, "sha256": sha, "url": url, "gateways": gateways})
+
+    @app.get("/firmware/{name}")
+    async def api_firmware(name: str) -> FileResponse:
+        try:
+            # `name` is `<version>.bin`; reuse the version validator on the
+            # stem so path traversal / unsafe names are rejected the same way.
+            # Join the VALIDATED filename (not raw `name`) so `..` can never
+            # select firmware_dir's parent.
+            safe = ota_helpers.safe_firmware_name(Path(name).stem)
+        except ValueError as e:
+            raise HTTPException(400, "bad firmware name") from e
+        path = engine.firmware_dir / safe
+        if not path.is_file():
+            raise HTTPException(404, "unknown firmware")
+        return FileResponse(path, media_type="application/octet-stream")
 
     return app

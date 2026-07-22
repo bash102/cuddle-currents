@@ -98,7 +98,20 @@ class SessionStore:
         return pid
 
     def person_for_device(self, device_id: str) -> str | None:
-        return self._device_to_person.get(device_id)
+        pid = self._device_to_person.get(device_id)
+        if pid is not None:
+            return pid
+        # BLE addresses can surface in different case per source (gateway
+        # firmware NimBLE toString() is lowercase; others may be upper), so a
+        # band enrolled in one case must still resolve when seen in another --
+        # otherwise the seen list shows a bare MAC for a known person. This is a
+        # read-only fallback: stored keys (and the profile.device_id /
+        # source-binding three-way sync) are untouched. O(n) on a miss, n small.
+        key = device_id.lower()
+        for dev, mapped in self._device_to_person.items():
+            if dev.lower() == key:
+                return mapped
+        return None
 
     def get(self, person_id: str) -> PersonSession | None:
         return self._sessions.get(person_id)

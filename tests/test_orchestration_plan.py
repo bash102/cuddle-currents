@@ -1,0 +1,489 @@
+"""Tests for the pure stability-first `plan()` orchestration core.
+
+`plan()` consumes a `WorldModel` (Task 2) snapshot plus pinned/pending state
+and decides which gateway should connect/release which band this tick. It is
+a pure function: no I/O, no async, no wall-clock reads -- `now` is always
+passed in.
+"""
+
+from cuddle.hub.orchestration.plan import Cmd, PlanCfg, Pending, plan
+from cuddle.hub.orchestration.world import WorldModel
+
+
+def _payload(capacity=4, mode="managed", connected=None, seen=None, ts=1_000):
+    return {
+        "capacity": capacity,
+        "mode": mode,
+        "connected": connected or [],
+        "seen": seen or [],
+        "ts": ts,
+    }
+
+
+def test_single_advertising_band_one_managed_gw_gets_connected():
+    world = WorldModel()
+    world.apply_report(
+        "gw1",
+        _payload(capacity=2, seen=[{"dev": "bandA", "rssi": -50}]),
+        now=100.0,
+    )
+
+    cmds, unserved, evictions = plan(
+        world, pinned=set(), pending={}, cfg=PlanCfg(), now=100.0, allow_rebalance=False
+    )
+
+    assert cmds == [Cmd(gw="gw1", action="connect", dev="bandA")]
+    assert unserved == []
+
+
+def test_stronger_rssi_wins_tie_broken_by_fewer_connected():
+    # Scenario A: different RSSI -> stronger (numerically greater, i.e. less
+    # negative) signal wins.
+    world_a = WorldModel()
+    world_a.apply_report("gw1", _payload(capacity=1, seen=[{"dev": "bandA", "rssi": -70}]), now=100.0)
+    world_a.apply_report("gw2", _payload(capacity=1, seen=[{"dev": "bandA", "rssi": -40}]), now=100.0)
+
+    cmds_a, unserved_a, evictions_a = plan(
+        world_a, pinned=set(), pending={}, cfg=PlanCfg(), now=100.0, allow_rebalance=False
+    )
+
+    assert cmds_a == [Cmd(gw="gw2", action="connect", dev="bandA")]
+    assert unserved_a == []
+
+    # Scenario B: tied RSSI -> gateway with fewer already-connected devs wins.
+    world_b = WorldModel()
+    world_b.apply_report(
+        "gw1",
+        _payload(capacity=2, connected=[{"dev": "other1", "rssi": -1}], seen=[{"dev": "bandB", "rssi": -50}]),
+        now=100.0,
+    )
+    world_b.apply_report(
+        "gw2",
+        _payload(capacity=2, connected=[], seen=[{"dev": "bandB", "rssi": -50}]),
+        now=100.0,
+    )
+
+    cmds_b, unserved_b, evictions_b = plan(
+        world_b, pinned=set(), pending={}, cfg=PlanCfg(), now=100.0, allow_rebalance=False
+    )
+
+    assert cmds_b == [Cmd(gw="gw2", action="connect", dev="bandB")]
+    assert unserved_b == []
+
+
+def test_band_with_live_pending_gets_no_duplicate_connect():
+    world = WorldModel()
+    world.apply_report(
+        "gw1", _payload(capacity=2, seen=[{"dev": "bandA", "rssi": -50}]), now=100.0
+    )
+    pending = {"bandA": Pending(gw="gw1", deadline=130.0)}
+
+    cmds, unserved, evictions = plan(
+        world, pinned=set(), pending=pending, cfg=PlanCfg(), now=100.0, allow_rebalance=False
+    )
+
+    assert cmds == []
+    assert unserved == []
+
+
+def test_connected_band_gets_no_connect_and_no_release():
+    world = WorldModel()
+    world.apply_report(
+        "gw1", _payload(capacity=2, connected=[{"dev": "bandA", "rssi": -50}]), now=100.0
+    )
+
+    cmds, unserved, evictions = plan(
+        world, pinned=set(), pending={}, cfg=PlanCfg(), now=100.0, allow_rebalance=True
+    )
+
+    assert cmds == []
+    assert unserved == []
+
+
+def test_opportunistic_gateway_never_issued_a_connect():
+    world = WorldModel()
+    world.apply_report(
+        "gw_opp",
+        _payload(capacity=5, mode="opportunistic", seen=[{"dev": "bandA", "rssi": -50}]),
+        now=100.0,
+    )
+
+    cmds, unserved, evictions = plan(
+        world, pinned=set(), pending={}, cfg=PlanCfg(), now=100.0, allow_rebalance=False
+    )
+
+    assert cmds == []
+    assert unserved == [{"dev": "bandA", "rssi": -50, "reason": "no_capacity"}]
+
+
+def test_pinned_band_placed_before_unpinned_competing_for_last_slot():
+    world = WorldModel()
+    world.apply_report(
+        "gw1",
+        _payload(
+            capacity=1,
+            seen=[{"dev": "bandPinned", "rssi": -50}, {"dev": "bandUnpinned", "rssi": -50}],
+        ),
+        now=100.0,
+    )
+
+    cmds, unserved, evictions = plan(
+        world,
+        pinned={"bandPinned"},
+        pending={},
+        cfg=PlanCfg(),
+        now=100.0,
+        allow_rebalance=False,
+    )
+
+    assert cmds == [Cmd(gw="gw1", action="connect", dev="bandPinned")]
+    assert unserved == [{"dev": "bandUnpinned", "rssi": -50, "reason": "no_capacity"}]
+
+
+def test_pinned_band_never_released_as_rebalance_target():
+    world = WorldModel()
+    # gw2 saw bandPinned advertising before it connected to gw1 -- stale-ish
+    # but fresh coverage memory that would otherwise tempt a rebalance.
+    world.apply_report(
+        "gw2", _payload(capacity=1, seen=[{"dev": "bandPinned", "rssi": -30}]), now=90.0
+    )
+    world.apply_report(
+        "gw1",
+        _payload(
+            capacity=1,
+            connected=[{"dev": "bandPinned", "rssi": -50}],
+            seen=[{"dev": "bandX", "rssi": -40}],
+        ),
+        now=95.0,
+    )
+    # gw2 now has a free slot and no longer sees bandPinned (it connected).
+    world.apply_report("gw2", _payload(capacity=1, connected=[], seen=[]), now=96.0)
+
+    cmds, unserved, evictions = plan(
+        world,
+        pinned={"bandPinned"},
+        pending={},
+        cfg=PlanCfg(coverage_ttl=60.0),
+        now=100.0,
+        allow_rebalance=True,
+    )
+
+    assert cmds == []
+    assert unserved == [{"dev": "bandX", "rssi": -40, "reason": "no_capacity"}]
+
+
+def test_unserved_band_without_rebalance_yields_no_cmd():
+    world = WorldModel()
+    world.apply_report(
+        "gw1",
+        _payload(
+            capacity=1,
+            connected=[{"dev": "bandY", "rssi": -50}],
+            seen=[{"dev": "bandZ", "rssi": -40}],
+        ),
+        now=100.0,
+    )
+    world.apply_report("gw2", _payload(capacity=1, connected=[], seen=[{"dev": "bandY", "rssi": -45}]), now=90.0)
+
+    cmds, unserved, evictions = plan(
+        world, pinned=set(), pending={}, cfg=PlanCfg(coverage_ttl=60.0), now=100.0, allow_rebalance=False
+    )
+
+    assert cmds == []
+    assert unserved == [{"dev": "bandZ", "rssi": -40, "reason": "no_capacity"}]
+
+
+def test_unserved_band_with_rebalance_and_fresh_coverage_releases_movable_y():
+    world = WorldModel()
+    world.apply_report(
+        "gw1",
+        _payload(
+            capacity=1,
+            connected=[{"dev": "bandY", "rssi": -50}],
+            seen=[{"dev": "bandZ", "rssi": -40}],
+        ),
+        now=100.0,
+    )
+    # gw2 has a free slot and fresh coverage memory of bandY (age 10 <= ttl 60).
+    world.apply_report("gw2", _payload(capacity=1, connected=[], seen=[{"dev": "bandY", "rssi": -45}]), now=90.0)
+
+    cmds, unserved, evictions = plan(
+        world, pinned=set(), pending={}, cfg=PlanCfg(coverage_ttl=60.0), now=100.0, allow_rebalance=True
+    )
+
+    assert cmds == [Cmd(gw="gw1", action="release", dev="bandY")]
+    assert unserved == []
+
+
+def test_unserved_band_with_rebalance_but_stale_coverage_yields_no_release():
+    world = WorldModel()
+    world.apply_report(
+        "gw1",
+        _payload(
+            capacity=1,
+            connected=[{"dev": "bandY", "rssi": -50}],
+            seen=[{"dev": "bandZ", "rssi": -40}],
+        ),
+        now=100.0,
+    )
+    # gw2 has a free slot but stale coverage memory of bandY (age 100 > ttl 60).
+    world.apply_report("gw2", _payload(capacity=1, connected=[], seen=[{"dev": "bandY", "rssi": -45}]), now=0.0)
+
+    cmds, unserved, evictions = plan(
+        world, pinned=set(), pending={}, cfg=PlanCfg(coverage_ttl=60.0), now=100.0, allow_rebalance=True
+    )
+
+    assert cmds == []
+    assert unserved == [{"dev": "bandZ", "rssi": -40, "reason": "no_capacity"}]
+
+
+def test_rebalance_target_free_slot_is_consumed_not_double_booked():
+    # gw3 saw both Y1 and Y2 advertising before they connected elsewhere --
+    # fresh coverage memory for both -- but only has ONE real free slot.
+    world = WorldModel()
+    world.apply_report(
+        "gw3",
+        _payload(
+            capacity=1,
+            connected=[],
+            seen=[{"dev": "Y1", "rssi": -40}, {"dev": "Y2", "rssi": -40}],
+        ),
+        now=90.0,
+    )
+    world.apply_report(
+        "gw1",
+        _payload(
+            capacity=1,
+            connected=[{"dev": "Y1", "rssi": -50}],
+            seen=[{"dev": "devA", "rssi": -40}],
+        ),
+        now=100.0,
+    )
+    world.apply_report(
+        "gw2",
+        _payload(
+            capacity=1,
+            connected=[{"dev": "Y2", "rssi": -50}],
+            seen=[{"dev": "devB", "rssi": -40}],
+        ),
+        now=100.0,
+    )
+
+    cmds, unserved, evictions = plan(
+        world, pinned=set(), pending={}, cfg=PlanCfg(coverage_ttl=60.0), now=100.0, allow_rebalance=True
+    )
+
+    releases = [c for c in cmds if c.action == "release"]
+    # Only ONE release may be justified by gw3's single free slot, not two.
+    assert len(releases) == 1
+    assert releases[0] == Cmd(gw="gw1", action="release", dev="Y1")
+    assert unserved == [{"dev": "devB", "rssi": -40, "reason": "no_capacity"}]
+
+
+def test_offline_managed_gateway_never_issued_a_connect():
+    world = WorldModel()
+    # gw_offline had ample free capacity and saw bandA advertising, but then
+    # goes offline -- its connected/seen state (and thus any slot it could
+    # have offered) is wiped, so it must never receive a connect.
+    world.apply_report(
+        "gw_offline",
+        _payload(
+            capacity=5,
+            mode="managed",
+            connected=[{"dev": "other", "rssi": -1}],
+            seen=[{"dev": "bandA", "rssi": -50}],
+        ),
+        now=100.0,
+    )
+    world.set_offline("gw_offline", now=105.0)
+    # A second managed+online gateway also sees bandA but is already full.
+    world.apply_report(
+        "gw_full",
+        _payload(
+            capacity=1,
+            mode="managed",
+            connected=[{"dev": "bandFull", "rssi": -40}],
+            seen=[{"dev": "bandA", "rssi": -45}],
+        ),
+        now=110.0,
+    )
+
+    cmds, unserved, evictions = plan(
+        world, pinned=set(), pending={}, cfg=PlanCfg(), now=110.0, allow_rebalance=False
+    )
+
+    assert cmds == []
+    assert unserved == [{"dev": "bandA", "rssi": -45, "reason": "no_capacity"}]
+
+
+def test_pinned_band_with_no_gateway_seeing_it_is_waiting_to_advertise():
+    world = WorldModel()
+    world.apply_report("gw1", _payload(capacity=5, connected=[], seen=[]), now=100.0)
+
+    cmds, unserved, evictions = plan(
+        world,
+        pinned={"bandGhost"},
+        pending={},
+        cfg=PlanCfg(),
+        now=100.0,
+        allow_rebalance=True,
+    )
+
+    assert cmds == []
+    assert unserved == [{"dev": "bandGhost", "rssi": None, "reason": "waiting_to_advertise"}]
+
+
+# ---- eviction cooldown: `evicted` param + `evictions` return value --------
+
+
+def test_evicted_dev_skips_barred_gateway_freeing_slot_for_target():
+    # gw1 has exactly one free slot and both bandY and bandZ are advertising
+    # to it; bandY's signal there is strong, so absent the eviction it would
+    # win the slot straight back (the release/reconnect thrash the eviction
+    # cooldown exists to prevent). gw2 has a free slot and (weaker) coverage
+    # of bandY -- its escape route once gw1 is barred.
+    world = WorldModel()
+    world.apply_report(
+        "gw1",
+        _payload(
+            capacity=1,
+            connected=[],
+            seen=[{"dev": "bandY", "rssi": -30}, {"dev": "bandZ", "rssi": -40}],
+        ),
+        now=100.0,
+    )
+    world.apply_report(
+        "gw2",
+        _payload(capacity=1, connected=[], seen=[{"dev": "bandY", "rssi": -70}]),
+        now=100.0,
+    )
+
+    cmds, unserved, evictions = plan(
+        world,
+        pinned=set(),
+        pending={},
+        cfg=PlanCfg(),
+        now=100.0,
+        allow_rebalance=False,
+        evicted={"bandY": {"gw1"}},
+    )
+
+    assert cmds == [
+        Cmd(gw="gw2", action="connect", dev="bandY"),
+        Cmd(gw="gw1", action="connect", dev="bandZ"),
+    ]
+    assert unserved == []
+
+
+def test_rebalance_release_is_reported_in_evictions():
+    world = WorldModel()
+    world.apply_report(
+        "gw1",
+        _payload(
+            capacity=1,
+            connected=[{"dev": "bandY", "rssi": -50}],
+            seen=[{"dev": "bandZ", "rssi": -40}],
+        ),
+        now=100.0,
+    )
+    # gw2 has a free slot and fresh coverage memory of bandY (age 10 <= ttl 60).
+    world.apply_report("gw2", _payload(capacity=1, connected=[], seen=[{"dev": "bandY", "rssi": -45}]), now=90.0)
+
+    cmds, unserved, evictions = plan(
+        world, pinned=set(), pending={}, cfg=PlanCfg(coverage_ttl=60.0), now=100.0, allow_rebalance=True
+    )
+
+    assert cmds == [Cmd(gw="gw1", action="release", dev="bandY")]
+    assert unserved == []
+    assert evictions == [("bandY", "gw1")]
+
+
+def test_freshly_advertising_band_waits_for_settle_window():
+    world = WorldModel()
+    world.apply_report(
+        "gw1", _payload(capacity=2, seen=[{"dev": "bandA", "rssi": -50}]), now=100.0
+    )
+    cfg = PlanCfg(settle_window=4.0)
+
+    # 1s after the first sighting: too soon. Hold off placing it -- and it is
+    # NOT "unserved" (it's simply still settling, distinct from no_capacity).
+    cmds, unserved, _ = plan(
+        world, pinned=set(), pending={}, cfg=cfg, now=101.0, allow_rebalance=False
+    )
+    assert cmds == []
+    assert unserved == []
+
+    # Once the settle window has elapsed, place it normally.
+    cmds, unserved, _ = plan(
+        world, pinned=set(), pending={}, cfg=cfg, now=104.0, allow_rebalance=False
+    )
+    assert cmds == [Cmd(gw="gw1", action="connect", dev="bandA")]
+    assert unserved == []
+
+
+def test_settle_window_lets_a_later_reporting_gateway_win_placement():
+    # The core of the feature: give every gateway a chance to report the band
+    # before choosing. gw1 sees it first (weakly); gw2 only reports it a
+    # second later, but stronger. With the settle window we wait and pick gw2.
+    world = WorldModel()
+    world.apply_report(
+        "gw1", _payload(capacity=1, seen=[{"dev": "bandA", "rssi": -70}]), now=100.0
+    )
+    cfg = PlanCfg(settle_window=4.0)
+
+    # Without the window we'd connect to gw1 right now; with it, we hold.
+    cmds, _, _ = plan(
+        world, pinned=set(), pending={}, cfg=cfg, now=101.0, allow_rebalance=False
+    )
+    assert cmds == []
+
+    # gw2 finally reports the same band, with a stronger signal.
+    world.apply_report(
+        "gw2", _payload(capacity=1, seen=[{"dev": "bandA", "rssi": -40}]), now=102.0
+    )
+
+    # Settle window (from first sighting at t=100) elapsed -> choose the
+    # strongest across BOTH gateways, i.e. gw2, which only appeared at t=102.
+    cmds, _, _ = plan(
+        world, pinned=set(), pending={}, cfg=cfg, now=104.0, allow_rebalance=False
+    )
+    assert cmds == [Cmd(gw="gw2", action="connect", dev="bandA")]
+
+
+def test_pinned_band_also_waits_for_settle_window_without_being_unserved():
+    world = WorldModel()
+    world.apply_report(
+        "gw1", _payload(capacity=2, seen=[{"dev": "bandA", "rssi": -50}]), now=100.0
+    )
+    cfg = PlanCfg(settle_window=4.0)
+
+    # A pinned (enrolled) band still settles before placement -- and while
+    # settling it is NOT reported unserved (it's advertising, just not long
+    # enough), distinct from the waiting_to_advertise / no_capacity reasons.
+    cmds, unserved, _ = plan(
+        world, pinned={"bandA"}, pending={}, cfg=cfg, now=101.0, allow_rebalance=False
+    )
+    assert cmds == []
+    assert unserved == []
+
+    cmds, _, _ = plan(
+        world, pinned={"bandA"}, pending={}, cfg=cfg, now=104.0, allow_rebalance=False
+    )
+    assert cmds == [Cmd(gw="gw1", action="connect", dev="bandA")]
+
+
+def test_settle_window_zero_places_immediately():
+    # Backward-compatible default: settle_window=0 -> no hold-off.
+    world = WorldModel()
+    world.apply_report(
+        "gw1", _payload(capacity=2, seen=[{"dev": "bandA", "rssi": -50}]), now=100.0
+    )
+    cmds, _, _ = plan(
+        world,
+        pinned=set(),
+        pending={},
+        cfg=PlanCfg(settle_window=0.0),
+        now=100.0,
+        allow_rebalance=False,
+    )
+    assert cmds == [Cmd(gw="gw1", action="connect", dev="bandA")]

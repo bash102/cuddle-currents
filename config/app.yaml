@@ -55,3 +55,13 @@ mqtt:
   port: 1883
   topic_prefix: cuddle        # topics: cuddle/<gateway>/hr|status/<device>, cuddle/<gateway>/online
   max_connections: 4          # per-gateway BLE cap; conservative default, validate on hardware
+
+orchestrator:
+  enabled: false               # Phase 2: BLE->WiFi gateway orchestration (requires mqtt source)
+  report_debounce: 0.5
+  reconcile_interval: 5.0
+  pending_ttl: 8.0
+  coverage_ttl: 60.0
+  rebalance_cooldown: 10.0
+  evict_cooldown: 10.0
+  settle_window: 4.0           # wait ~2 report cycles so every gateway reports a new band before placing it
