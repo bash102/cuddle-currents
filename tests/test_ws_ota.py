@@ -101,6 +101,9 @@ def test_get_firmware_serves_then_404_and_rejects_traversal(tmp_path):
     assert client.get("/firmware/1.4.0.bin").status_code == 200
     assert client.get("/firmware/9.9.9.bin").status_code == 404
     assert client.get("/firmware/..%2fsecrets").status_code in (400, 404)
+    # `..` must never resolve to firmware_dir's parent: the served path is
+    # built from the validated filename, so this can only be a miss, not a hit.
+    assert client.get("/firmware/%2e%2e").status_code in (400, 404)
 
 
 def test_post_ota_errors_when_host_is_loopback(tmp_path):

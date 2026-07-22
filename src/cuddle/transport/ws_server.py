@@ -233,10 +233,12 @@ def create_app(engine) -> FastAPI:
         try:
             # `name` is `<version>.bin`; reuse the version validator on the
             # stem so path traversal / unsafe names are rejected the same way.
-            ota_helpers.safe_firmware_name(Path(name).stem)
+            # Join the VALIDATED filename (not raw `name`) so `..` can never
+            # select firmware_dir's parent.
+            safe = ota_helpers.safe_firmware_name(Path(name).stem)
         except ValueError as e:
             raise HTTPException(400, "bad firmware name") from e
-        path = engine.firmware_dir / name
+        path = engine.firmware_dir / safe
         if not path.is_file():
             raise HTTPException(404, "unknown firmware")
         return FileResponse(path, media_type="application/octet-stream")
