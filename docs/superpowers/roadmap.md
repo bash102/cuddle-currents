@@ -125,6 +125,18 @@ Flashing and configuring many gateways; over-the-air firmware updates.
 The actual target. Validate processing/synchrony throughput, the Show puddle at ~30 dots,
 and MQTT message volume at scale. May surface tuning work in `processing/` and the frontend.
 
+**Measured (isolated 5-gateway mock fleet + 30-person sim capture, no hardware):** the
+gateway/MQTT/orchestration path holds fine — 30/30 bands placed across 5 managed gateways,
+~33 HR msg/s ingested. **But the app does NOT sustain the 10 Hz frame loop at 30 people:**
+`synchrony.compute()` alone is ~149 ms/frame at N=30 (9 ms at N=6, 42 ms at N=15 — clean
+O(N²)), so the fixed-cadence frame loop drops to ~3 Hz. Root cause: 435 pairs each running a
+±8-sample lag sweep (`sync_max_lag`), recomputed EVERY frame. Fix directions (cheapest first):
+(1) **decouple synchrony from the visual frame** — recompute it at ~1-2 Hz, not 10 Hz (it's
+slow-changing; the puddle already smooths); (2) drop/adapt `sync_max_lag` for large N; (3)
+vectorize the pairwise CCC (numpy batch vs. the Python 435-pair loop).
+
+**DONE — synchrony vectorized** (masked-matmul CCC/PLV, max-over-lags): pairwise CCC 125.8 ms -> 0.93 ms at N=30 (~135x), numerically identical to the loop (max diff ~1e-15, regression-tested). End-to-end frame rate 3.0 -> 5.5 Hz, CPU 53% -> 40%. **Then** removed the remaining per-person duplication (the 30 s smoothed grid was computed for both `hr_var` and synchrony; RMSSD for both the readout and its delta) by deriving each person's grid + RMSSD once per frame and sharing them (build_frame -> synchrony via `hr_grids`; bit-identical output) — per-frame per-person+synchrony work 94 -> 55 ms. **And** made the frame loop rate-compensating (it slept a *full* period AFTER each build, so the real rate was build+period). **Result: sustained 10.0 Hz at 30 people, CPU 53% -> 28.6%** (measured, isolated 5-gateway mock fleet). M6 processing throughput: met.
+
 **Gateway BLE ceiling: 3 on the Arduino toolchain → 6 validated on the ESP-IDF port.**
 Arduino hardware test with 6 bands: the gateway saw all 6 but only 3 subscribed; the 4th+
 got repeated `connect FAILED`. The limit was the precompiled BT controller's concurrent-ACL
@@ -165,11 +177,12 @@ Small, independent polish items (no dependencies; pick up any time):
   `person_id` (commit `4ae6df5`); `person_for_device` now matches addresses case-insensitively
   so an enrolled band resolves to its person in the seen list even when the MAC casing differs
   between sources (firmware NimBLE `toString()` is lowercase).
-- **Ops enroll: confirm on Enter.** Pressing Enter in the enroll name field should confirm
-  the name→band enrollment (currently requires clicking the button).
-- **Ops HR charts: labeled axes.** Add x (time) and y (bpm) axes to the per-person HR charts.
-- **Ops: remove the orbiting circle.** Drop the orbiting-circle element/animation on the Ops
-  page.
+- **Ops enroll: confirm on Enter — DONE.** Pressing Enter in the enroll name field confirms
+  the name→band enrollment (same as clicking Enroll).
+- **Ops HR charts: labeled axes — DONE.** Per-person HR trace now has a y-axis (bpm min/max)
+  and an x-axis (time →, oldest beat left → newest right).
+- **Ops: remove the orbiting circle — DONE.** Dropped the per-person phase dial (the dot
+  orbiting a circle) from the Ops cards.
 - **Firmware: RGB status LED — DONE.** Onboard NeoPixel (GPIO48, `rgbLedWrite`, intentionally
   dim — channels capped at 24) shows link/mode/load: yellow (Wi-Fi connecting) · blue (portal) ·
   orange (MQTT down) · green (online/opportunistic, brighter with band count) · teal (managed).

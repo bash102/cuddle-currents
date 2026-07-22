@@ -3,7 +3,14 @@
 import numpy as np
 
 from cuddle.core.models import Calibration
-from cuddle.processing.synchrony import _kuramoto_order, _transform, best_lag_ccc, ccc
+from cuddle.processing.synchrony import (
+    _ccc_matrix,
+    _kuramoto_order,
+    _plv_matrix,
+    _transform,
+    best_lag_ccc,
+    ccc,
+)
 
 
 def test_ccc_identical_series():
@@ -101,3 +108,85 @@ def test_kuramoto_order_locked_vs_scattered():
     # Evenly spread phases -> order ~ 0
     scattered = [np.full_like(grid, 2 * np.pi * k / 5) for k in range(5)]
     assert _kuramoto_order(scattered, grid) < 0.2
+
+
+def test_vectorized_ccc_matrix_matches_loop():
+    # The vectorized _ccc_matrix must equal the per-pair best_lag_ccc loop it
+    # replaced, incl. NaN gaps, a constant (degenerate-denom) series, and a
+    # near-empty (<3 finite) series that must be excluded.
+    rng = np.random.default_rng(11)
+    n, T, max_lag = 10, 120, 8
+    series = [np.cumsum(rng.normal(size=T)) for _ in range(n)]
+    for x in series:
+        x[rng.random(T) < 0.1] = np.nan
+    series[3] = np.full(T, 7.0)               # constant -> denom ~ 0
+    bad = np.full(T, np.nan); bad[:2] = 1.0   # <3 finite -> excluded
+    series[4] = bad
+    ref = np.eye(n)
+    for i in range(n):
+        for j in range(i + 1, n):
+            ref[i, j] = ref[j, i] = best_lag_ccc(series[i], series[j], max_lag)[0]
+    assert np.allclose(_ccc_matrix(series, max_lag), ref, atol=1e-9)
+
+
+def test_vectorized_ccc_matrix_no_lag_matches_loop():
+    rng = np.random.default_rng(21)
+    n, T = 8, 120
+    series = [np.cumsum(rng.normal(size=T)) for _ in range(n)]
+    for x in series:
+        x[rng.random(T) < 0.1] = np.nan
+    ref = np.eye(n)
+    for i in range(n):
+        for j in range(i + 1, n):
+            m = np.isfinite(series[i]) & np.isfinite(series[j])
+            ref[i, j] = ref[j, i] = ccc(series[i][m], series[j][m]) if m.sum() >= 3 else 0.0
+    assert np.allclose(_ccc_matrix(series, 0), ref, atol=1e-9)
+
+
+def test_vectorized_plv_matrix_matches_loop():
+    rng = np.random.default_rng(12)
+    n, T = 8, 120
+    ph = [rng.random(T) * 2 * np.pi for _ in range(n)]
+    for p in ph:
+        p[rng.random(T) < 0.1] = np.nan
+    ref = np.eye(n)
+    for i in range(n):
+        for j in range(i + 1, n):
+            m = np.isfinite(ph[i]) & np.isfinite(ph[j])
+            ref[i, j] = ref[j, i] = (
+                float(np.abs(np.mean(np.exp(1j * (ph[i][m] - ph[j][m]))))) if m.sum() >= 3 else 0.0
+            )
+    assert np.allclose(_plv_matrix(ph), ref, atol=1e-9)
+
+
+def test_compute_hr_grids_reuse_matches_recompute():
+    # build_frame precomputes each person's smoothed-HR grid and passes it to
+    # compute() via hr_grids; that must be identical to compute() recomputing it.
+    from cuddle.core.config import load_config
+    from cuddle.core.models import EnrollmentState, NormalizedSample, PersonProfile, Source
+    from cuddle.hub.registry import SessionStore
+    from cuddle.processing import abstract, synchrony
+
+    cfg = load_config(None)
+    proc, art = cfg["processing"], cfg.get("artifact")
+    rng = np.random.default_rng(5)
+    now = 1000.0
+    store = SessionStore()
+    for k in range(4):
+        store.create_person(PersonProfile(person_id=f"p{k}", display_name=f"P{k}",
+                                          device_id=f"D{k}", enrollment_state=EnrollmentState.active))
+        s = store.get(f"p{k}")
+        t = now - 40.0
+        while t < now:
+            rr = float(0.9 + rng.normal(scale=0.05))
+            t += rr
+            s.add_beat(NormalizedSample(person_id=f"p{k}", device_id=f"D{k}", source=Source.mqtt,
+                                        t_recv=t, hr_bpm=int(round(60.0 / rr)), rr_intervals=[rr], contact=True, seq=0))
+    sess = store.all()
+    w, hz, tau = proc["sync_window"], proc["resample_hz"], proc["hr_smooth_tau"]
+    grids = {s.profile.person_id: abstract.smoothed_hr_grid(s, now - w, now, hz, tau, art) for s in sess}
+    a = synchrony.compute(sess, now, cfg)
+    b = synchrony.compute(sess, now, cfg, hr_grids=grids)
+    assert np.array_equal(np.array(a["matrix"]), np.array(b["matrix"]))
+    assert np.array_equal(np.array(a["plv"]), np.array(b["plv"]))
+    assert a["cohesion"] == b["cohesion"]

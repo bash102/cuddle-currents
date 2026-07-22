@@ -67,6 +67,12 @@ def build_engine(args) -> Engine:
         rc = cfg["reconnect"]
         broker = args.broker or f"{mq['broker']}:{mq['port']}"
         host, _, port = broker.partition(":")
+        # Fold the resolved broker back into cfg so the orchestrator (built from
+        # cfg["mqtt"] inside the Engine) uses the SAME broker as the source. Without
+        # this, --broker moved only the source and the orchestrator stayed on the
+        # app.yaml default -- two clients on different brokers.
+        mq["broker"] = host
+        mq["port"] = int(port or mq["port"])
         source = GatewayMqttSource(
             broker=host,
             port=int(port or mq["port"]),

@@ -132,3 +132,10 @@ Gateways receive firmware updates via MQTT-triggered pull:
    cannot reach MQTT within ~60s, it auto-reverts to the previous slot and reboots. This
    prevents a broken image from bricking a gateway fleet. After connection, the new version
    is confirmed and the previous image is discarded.
+
+7. **Trust model (POC — trusted LAN only)**: `/api/ota` is **unauthenticated** and images
+   are served over plain HTTP, so anyone who can reach the app's LAN address can flash the
+   whole fleet. The command's `sha256` is for integrity (corrupt-download detection), not
+   authenticity. This is acceptable only on a trusted LAN. Before exposing to any untrusted
+   network: add auth to `/api/ota`, bind to a trusted interface, and move to signed images
+   over HTTPS.

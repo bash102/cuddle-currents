@@ -46,6 +46,13 @@ def build_frame(
     source_states = source.connection_states
     proc = cfg["processing"]
 
+    art = cfg.get("artifact")
+    # Per person, derive the expensive intermediates ONCE per frame and reuse:
+    # the smoothed-HR grid over the sync window feeds both hr_var here and the
+    # synchrony correlation (hr_grids, passed below); RMSSD feeds both the readout
+    # and its delta. Avoids the old ~5 artifact/resample passes per person.
+    hr_grids: dict[str, tuple] = {}
+
     people: list[PersonState] = []
     for session in store.all():
         p = session.profile
@@ -55,7 +62,13 @@ def build_frame(
         connection = _connection_for(session, source_states, now, cfg)
         session.connection = connection
         quality, flags = signal_quality.assess(session, now, cfg)
-        art = cfg.get("artifact")
+
+        grid_s, smooth_s = abstract.smoothed_hr_grid(
+            session, now - proc["sync_window"], now, proc["resample_hz"],
+            proc["hr_smooth_tau"], art,
+        )
+        hr_grids[p.person_id] = (grid_s, smooth_s)
+        rmssd_val = abstract.rolling_rmssd(session, now, proc["rmssd_window"], art)
 
         people.append(
             PersonState(
@@ -70,14 +83,9 @@ def build_frame(
                 quality=round(quality, 3),
                 quality_flags=flags,
                 hr=_round(abstract.current_hr(session, proc["hr_smooth_tau"], art)),
-                hr_var=_round(
-                    abstract.windowed_hr_std(
-                        session, now, proc["sync_window"], proc["resample_hz"],
-                        proc["hr_smooth_tau"], art,
-                    )
-                ),
-                rmssd=_round(abstract.rolling_rmssd(session, now, proc["rmssd_window"], art)),
-                rmssd_delta=_round(abstract.rmssd_delta(session, now, proc["rmssd_window"], art)),
+                hr_var=_round(abstract.hr_std_from_grid(smooth_s)),
+                rmssd=_round(rmssd_val),
+                rmssd_delta=_round(abstract.rmssd_delta_from(rmssd_val, p.calibration)),
                 phase=_round(abstract.phase_at(session, now)),
                 last_seen=session.last_seen,
                 uptime=session.uptime(now),
@@ -87,7 +95,7 @@ def build_frame(
             )
         )
 
-    sync = synchrony.compute(store.all(), now, cfg)
+    sync = synchrony.compute(store.all(), now, cfg, hr_grids=hr_grids)
     unassigned = source.unassigned_devices()
 
     gateways = orchestrator.gateway_states() if orchestrator else []

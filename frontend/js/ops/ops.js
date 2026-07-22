@@ -22,6 +22,7 @@ function theme() {
     scan: cssVar("--scan") || "#9b5de5",
     trace: cssVar("--trace") || "#ffb27a",
     border: cssVar("--border") || "#3d2230",
+    muted: cssVar("--muted") || "#9a8a94",
     heatNeg: cssVar("--heat-neg") || "#3b6fe0",
     heatMid: cssVar("--heat-mid") || "#241019",
     heatPos: cssVar("--heat-pos") || "#ff8a6b",
@@ -103,9 +104,14 @@ function reconcileDevices(devices) {
           <button class="enrollbtn">Enroll</button>
         </div>
         <select class="assignsel" title="assign this band to an existing (parked) person"></select>`;
-      node.querySelector(".enrollbtn").addEventListener("click", async () => {
+      const doEnroll = async () => {
         const name = node.querySelector(".nameinput").value.trim() || d.device_id;
         await post("/api/enroll", { device_id: d.device_id, display_name: name });
+      };
+      node.querySelector(".enrollbtn").addEventListener("click", doEnroll);
+      // Enter in the name field confirms enrollment (same as clicking Enroll).
+      node.querySelector(".nameinput").addEventListener("keydown", (e) => {
+        if (e.key === "Enter") { e.preventDefault(); doEnroll(); }
       });
       const assignSel = node.querySelector(".assignsel");
       assignSel.addEventListener("change", async () => {
@@ -206,7 +212,7 @@ function makePersonCard(p) {
       <div class="metric"><label>ΔHRV</label><span class="hrvd">—</span></div>
     </div>
     <div class="qualwrap"><div class="qualbar"><div class="qualfill"></div></div><span class="qflags"></span></div>
-    <div class="tracewrap"><canvas class="trace" width="320" height="48"></canvas><canvas class="dial" width="48" height="48"></canvas></div>
+    <div class="tracewrap"><canvas class="trace" width="400" height="64"></canvas></div>
     <div class="baseprog"><div class="basefill"></div></div>`;
   root.querySelector(".baselinebtn").addEventListener("click", () =>
     post("/api/baseline/start", { person_id: p.person_id }));
@@ -225,7 +231,6 @@ function makePersonCard(p) {
     qualfill: root.querySelector(".qualfill"),
     qflags: root.querySelector(".qflags"),
     trace: root.querySelector(".trace"),
-    dial: root.querySelector(".dial"),
     baseprog: root.querySelector(".baseprog"),
     basefill: root.querySelector(".basefill"),
     baselinebtn: root.querySelector(".baselinebtn"),
@@ -311,37 +316,59 @@ function updatePersonCard(n, p) {
   if (bp != null) n.basefill.style.width = `${bp * 100}%`;
 
   drawTrace(n.trace, p.hr_trace_tail || []);
-  drawDial(n.dial, p.phase, p.color);
 }
 
+// Per-person HR trace with labelled axes: y = bpm (min/max of the window), x =
+// time (oldest beat left -> newest right). `data` is the last ~60 beats, so the
+// x span is beat-driven (not a fixed number of seconds) -> label it by direction.
 function drawTrace(cv, data) {
   const ctx = cv.getContext("2d");
+  const t = theme();
   ctx.clearRect(0, 0, cv.width, cv.height);
-  if (data.length < 2) return;
+  const padL = 30, padB = 14, padT = 4, padR = 6;
+  const plotW = cv.width - padL - padR;
+  const plotH = cv.height - padT - padB;
+
+  // axis frame (y on the left, x along the bottom)
+  ctx.strokeStyle = t.border;
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(padL, padT);
+  ctx.lineTo(padL, padT + plotH);
+  ctx.lineTo(padL + plotW, padT + plotH);
+  ctx.stroke();
+
+  ctx.fillStyle = t.muted;
+  ctx.font = "9px system-ui, sans-serif";
+  ctx.textAlign = "right";
+  ctx.textBaseline = "bottom";
+  ctx.fillText("time →", padL + plotW, cv.height);  // x axis = time
+
   const vals = data.filter((v) => v != null);
+  if (vals.length < 2) return;
   const min = Math.min(...vals), max = Math.max(...vals);
   const span = Math.max(1, max - min);
-  ctx.strokeStyle = theme().trace;
+
+  // y labels (bpm) at top (max) and bottom (min)
+  ctx.textAlign = "right";
+  ctx.textBaseline = "top";
+  ctx.fillText(String(Math.round(max)), padL - 3, padT);
+  ctx.textBaseline = "bottom";
+  ctx.fillText(String(Math.round(min)), padL - 3, padT + plotH);
+
+  // the trace itself, clipped to the plot area
+  ctx.strokeStyle = t.trace;
   ctx.lineWidth = 1.5;
   ctx.beginPath();
+  let started = false;
   data.forEach((v, i) => {
-    const x = (i / (data.length - 1)) * cv.width;
-    const y = cv.height - ((v - min) / span) * (cv.height - 6) - 3;
-    i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+    if (v == null) return;
+    const x = padL + (i / (data.length - 1)) * plotW;
+    const y = padT + plotH - ((v - min) / span) * plotH;
+    if (started) ctx.lineTo(x, y);
+    else { ctx.moveTo(x, y); started = true; }
   });
   ctx.stroke();
-}
-
-function drawDial(cv, phase, color) {
-  const ctx = cv.getContext("2d");
-  const cx = cv.width / 2, cy = cv.height / 2, r = 18;
-  ctx.clearRect(0, 0, cv.width, cv.height);
-  ctx.strokeStyle = theme().border;
-  ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.stroke();
-  if (phase == null) return;
-  const x = cx + r * Math.cos(phase), y = cy + r * Math.sin(phase);
-  ctx.fillStyle = color || theme().trace;
-  ctx.beginPath(); ctx.arc(x, y, 4, 0, Math.PI * 2); ctx.fill();
 }
 
 // ---- synchrony heatmap ------------------------------------------------------
