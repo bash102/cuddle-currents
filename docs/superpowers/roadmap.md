@@ -154,6 +154,13 @@ Existing README roadmap item — durable session storage/history beyond flat cap
 
 Small, independent polish items (no dependencies; pick up any time):
 
+- **Gateway naming: assign a human-friendly name to each gateway.** Gateways are identified
+  today by their auto-unique id (e.g. `esp32-01-a172e0`), which is opaque on the Ops roster.
+  Let an operator assign a friendly label ("Living Room", "Kitchen") shown wherever a gateway
+  appears (Ops roster, unserved callout). Open design question: where the name lives — an
+  app-side id→name map (simplest; survives reflash, no firmware change) vs. persisted in the
+  gateway's NVS and surfaced in its `report` payload (travels with the hardware). Lean app-side
+  first.
 - **Ops enroll: confirm on Enter.** Pressing Enter in the enroll name field should confirm
   the name→band enrollment (currently requires clicking the button).
 - **Ops HR charts: labeled axes.** Add x (time) and y (bpm) axes to the per-person HR charts.
