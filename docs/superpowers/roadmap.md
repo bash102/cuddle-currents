@@ -177,11 +177,10 @@ Small, independent polish items (no dependencies; pick up any time):
 - **Firmware: fleet bring-up — DONE.** Gateway id auto-appends a per-chip MAC suffix (one image
   → unique per board, e.g. `esp32-01-a172e0`), and optional compile-time `WIFI_SSID`/`WIFI_PASS`
   in `secrets.h` let a freshly-flashed gateway auto-join with no captive portal.
-- **Firmware: OTA updates.** *(Reviewed: the flash is OTA-**ready** — dual 3 MB app slots
-  `ota_0`/`ota_1` + `otadata` on the 16 MB partition table — but **no OTA code exists**; updates
-  today are USB-only via `idf.py flash`.)* Add an over-the-air update path (no re-partitioning
-  needed). Options, easiest first: **ArduinoOTA** (already compiled into the build, just unused —
-  push over the LAN with `espota.py`); **`esp_https_ota`** (gateway pulls a `.bin` from an
-  HTTP(S) URL — good for a fleet); or an **MQTT-triggered pull** on a `cuddle/<gw>/ota` topic
-  (fits the existing control-topic pattern; update the whole fleet from the app). Do this before
-  a real multi-gateway rollout so you aren't USB-flashing ~5 gateways one at a time. (Milestone 5.)
+- **Firmware: OTA updates.** — **DONE** (Tasks 5–7). Fleet-wide over-the-air updates via
+  MQTT-triggered pull: the app posts a command on `cuddle/control/ota` with an image URL;
+  gateways fetch and self-update in dual-slot OTA with auto-rollback if the new image fails
+  to reach MQTT within ~60s. See `firmware/gateway-idf/README.md` for usage. Follow-up items
+  (not blocking): **staggered/rolling rollout** (limit concurrent updates to avoid overload),
+  **per-gateway targeting** (selective fleet updates), and **HTTPS + signed images** (trusted
+  LAN only; TLS/signing deferred for Phase 2).

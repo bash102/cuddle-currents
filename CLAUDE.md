@@ -105,3 +105,7 @@ sources/ → hub/ → processing/ → transport/ → frontend/
 - Scenarios (`sources/scenarios.py`) are pure/deterministic given their construction args, so
   tests assert on their shape (`tests/test_sim_scenarios.py`); add new scenarios to
   `make_scenario`, `SCENARIO_NAMES`, and the Ops dropdown in `frontend/ops.html`.
+- **Firmware version lives in `firmware/gateway-idf/version.txt` and MUST be bumped whenever
+  firmware changes.** It is embedded in the image (`esp_app_desc_t`), reported by each gateway
+  (`report.version`), and drives OTA's same-version skip + rollback bookkeeping. Shipping a
+  firmware change without rolling the version breaks OTA's ability to tell images apart.

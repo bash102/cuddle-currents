@@ -101,3 +101,33 @@ for an orchestrator that isn't there.
 Implemented and build-verified (`idf.py build` clean, no new warnings); **on-hardware
 validation of managed mode is still pending** — no gateway has been flashed and run against a
 live orchestrator yet, so treat this as build-verified, not field-verified.
+
+## OTA updates
+
+Gateways receive firmware updates via MQTT-triggered pull:
+
+1. **Bump the version**: Edit `version.txt`, increment the version string (e.g., `1.2.3` →
+   `1.2.4`). This is embedded in the image and reported in each gateway's `report.version`;
+   OTA skips gateways already running the new version.
+
+2. **Build the image**: `idf.py build` produces `build/cuddle-gateway.bin`.
+
+3. **Push to the fleet**: Use the Ops UI "Update fleet" button, or curl:
+   ```bash
+   curl -F bin=@build/cuddle-gateway.bin http://<lan-ip>:8770/api/ota
+   ```
+   The app broadcasts an MQTT command on `cuddle/control/ota` (NON-retained) with the image
+   URL; all gateways fetch and self-update.
+
+4. **App accessibility**: The app must run with `--host 0.0.0.0` so gateways on the same LAN
+   can reach the image URL. Localhost-only bindings will cause OTA to fail for remote devices.
+
+5. **First rollback-enabled build**: The partition table and bootloader were redesigned to
+   support dual-slot OTA. If flashing an image older than or concurrent with the first OTA-
+   capable build, use USB + `idf.py flash` (rollback slots don't exist yet). Once that image
+   is on the device, all later OTA updates use the dual-slot mechanism.
+
+6. **Auto-rollback health gate**: The gateway enters a health-check window after OTA: if it
+   cannot reach MQTT within ~60s, it auto-reverts to the previous slot and reboots. This
+   prevents a broken image from bricking a gateway fleet. After connection, the new version
+   is confirmed and the previous image is discarded.
