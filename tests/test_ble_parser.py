@@ -89,3 +89,34 @@ def test_stray_trailing_rr_byte_ignored():
     # RR present, one full RR (00 04) plus a stray odd byte -> ignore the stray
     m = parse_hr_measurement(bytes([0x10, 60, 0x00, 0x04, 0x07]))
     assert len(m.rr_intervals) == 1
+
+
+from cuddle.sources.ble_parser import encode_hr_measurement
+
+
+def test_encode_roundtrips_uint8_hr_no_rr():
+    frame = encode_hr_measurement(72)
+    m = parse_hr_measurement(frame)
+    assert m.hr_bpm == 72
+    assert m.rr_intervals == []
+
+
+def test_encode_sets_rr_present_flag_and_quantizes():
+    frame = encode_hr_measurement(60, rr_intervals=[1.0, 0.5])
+    assert frame[0] & 0x10  # RR-present flag
+    m = parse_hr_measurement(frame)
+    assert len(m.rr_intervals) == 2
+    assert m.rr_intervals[0] == pytest.approx(1.0, abs=1 / 1024)
+    assert m.rr_intervals[1] == pytest.approx(0.5, abs=1 / 1024)
+
+
+def test_encode_uint16_hr_when_over_255():
+    frame = encode_hr_measurement(300)
+    assert frame[0] & 0x01  # 16-bit HR format flag
+    assert parse_hr_measurement(frame).hr_bpm == 300
+
+
+def test_encode_contact_bits_roundtrip():
+    assert parse_hr_measurement(encode_hr_measurement(65, contact=True)).contact is True
+    assert parse_hr_measurement(encode_hr_measurement(65, contact=False)).contact is False
+    assert parse_hr_measurement(encode_hr_measurement(65)).contact is None

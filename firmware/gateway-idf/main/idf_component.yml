@@ -1,0 +1,12 @@
+# Managed dependencies (pulled by the IDF component manager on `idf.py reconfigure`).
+# arduino-esp32 gives us the Arduino core (WiFi, Preferences, WebServer/DNSServer that
+# WiFiManager needs); esp-nimble-cpp is the IDF-native NimBLE C++ host (replaces the
+# Arduino-toolchain NimBLE-Arduino 1.4.x, which bundled its own host and capped at 3).
+# PubSubClient and WiFiManager are not in the registry — setup-components.sh vendors
+# them into components/ with CMake shims.
+dependencies:
+  idf: ">=5.3,<6.1"
+  espressif/arduino-esp32:
+    version: "3.3.10"
+  h2zero/esp-nimble-cpp:
+    version: "^2.5.0"

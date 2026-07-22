@@ -22,3 +22,4 @@ config/enrollment.yaml
 .DS_Store
 .vscode/
 .idea/
+.codegraph/

@@ -1,0 +1,45 @@
+# ============================================================================
+# The reason this IDF port exists: raise the BLE concurrent-connection ceiling.
+# Under the arduino-cli build the controller was precompiled at 3 ACL links and
+# no -D flag could move it. Here both the NimBLE host AND the controller compile
+# from source, so these two keys finally take effect. Keep them equal.
+# ============================================================================
+CONFIG_BT_ENABLED=y
+CONFIG_BT_NIMBLE_ENABLED=y
+# NimBLE host: max concurrent central links.
+CONFIG_BT_NIMBLE_MAX_CONNECTIONS=6
+# ESP32-S3 controller: max BLE "activities" (each link + scan + adv = 1). We hold 6
+# links and scan continuously until full, so 7 gives one slot of scan headroom for the
+# ramp-up window (and for a drop that restarts the scanner mid-connect). This is the
+# ceiling the arduino-cli build's precompiled controller froze at ~3 and no -D could move.
+CONFIG_BT_CTRL_BLE_MAX_ACT=7
+
+# --- Arduino as an ESP-IDF component --------------------------------------
+# Run the sketch's setup()/loop() automatically (vs. writing app_main ourselves).
+CONFIG_AUTOSTART_ARDUINO=y
+# arduino-esp32 bundles its own BLE libraries (Bluedroid/NimBLE wrappers) that don't
+# build against IDF 5.5's NimBLE (BLEDevice.cpp: ble_gap_read_local_irk undeclared) and
+# that we don't use — our BLE is esp-nimble-cpp. Selective compilation is opt-in with
+# everything defaulting on, so we turn OFF just the BT-family libs; WiFi/Network/
+# WebServer/DNSServer/Preferences/FS stay on for WiFiManager + PubSubClient + the sketch.
+CONFIG_ARDUINO_SELECTIVE_COMPILATION=y
+CONFIG_ARDUINO_SELECTIVE_BLE=n
+CONFIG_ARDUINO_SELECTIVE_SimpleBLE=n
+CONFIG_ARDUINO_SELECTIVE_BluetoothSerial=n
+# The big feature libs are default-on but pull deps that selective mode excludes
+# (e.g. ESP_SR needs ESP_I2S.h) and we don't use any of them. Networking + FS +
+# Preferences + WebServer/DNSServer stay on (they're what WiFiManager/PubSubClient need).
+CONFIG_ARDUINO_SELECTIVE_ESP_SR=n
+CONFIG_ARDUINO_SELECTIVE_Matter=n
+CONFIG_ARDUINO_SELECTIVE_Zigbee=n
+CONFIG_ARDUINO_SELECTIVE_OpenThread=n
+CONFIG_ARDUINO_SELECTIVE_RainMaker=n
+CONFIG_ARDUINO_SELECTIVE_Insights=n
+# arduino-esp32 requires a 1 kHz FreeRTOS tick (Arduino millis()/delay() semantics).
+CONFIG_FREERTOS_HZ=1000
+
+# --- Board: ESP32-S3, 16 MB flash, custom OTA partition table -------------
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+CONFIG_ESPTOOLPY_FLASHSIZE="16MB"
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
