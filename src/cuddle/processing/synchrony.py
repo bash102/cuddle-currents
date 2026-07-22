@@ -97,6 +97,83 @@ def _transform(series: np.ndarray, mode: str, cal) -> np.ndarray:
     return (series - mu) / sd
 
 
+def _ccc_pairs(a: np.ndarray, b: np.ndarray) -> np.ndarray:
+    """N×N Lin's CCC of a[i] vs b[j] over their both-finite samples, via masked
+    matmuls (population mean/var/cov, matching ``ccc``). NaN where <3 paired
+    finite samples; 0 where degenerate (denom <= 1e-12) — same guards as ``ccc``.
+
+    Vectorizes the pairwise loop: with the NaNs zeroed and a 0/1 finite mask, the
+    per-pair paired-finite count and sums of x, y, x², y², xy are all just
+    matmuls (mask@mask.T, x@mask.T, …), from which CCC follows elementwise."""
+    ma, mb = np.isfinite(a), np.isfinite(b)
+    a0, b0 = np.where(ma, a, 0.0), np.where(mb, b, 0.0)
+    maf, mbf = ma.astype(float), mb.astype(float)
+    npair = maf @ mbf.T
+    sx = a0 @ mbf.T
+    sy = maf @ b0.T
+    sxx = (a0 * a0) @ mbf.T
+    syy = maf @ (b0 * b0).T
+    sxy = a0 @ b0.T
+    with np.errstate(invalid="ignore", divide="ignore"):
+        mx, my = sx / npair, sy / npair
+        vx = sxx / npair - mx * mx
+        vy = syy / npair - my * my
+        cov = sxy / npair - mx * my
+        denom = vx + vy + (mx - my) ** 2
+        c = 2.0 * cov / denom
+    c = np.where(denom <= 1e-12, 0.0, c)
+    return np.where(npair >= 3, c, np.nan)  # <3 paired samples -> excluded
+
+
+def _ccc_matrix(series: list[np.ndarray], max_lag: int) -> np.ndarray:
+    """Vectorized equivalent of ``best_lag_ccc`` for every pair: the max Lin's CCC
+    over integer lags in [-max_lag, max_lag] (each lag one batch of matmuls, ~17
+    total, vs. 435×17 tiny per-pair calls). Diagonal 1.0. Returns N×N."""
+    n = len(series)
+    if n == 0:
+        return np.zeros((0, 0))
+    X = np.vstack(series).astype(float)
+    T = X.shape[1]
+    lags = range(-max_lag, max_lag + 1) if max_lag > 0 else (0,)
+    best = np.full((n, n), -np.inf)
+    for lag in lags:
+        if lag > 0:
+            a, b = X[:, lag:], X[:, : T - lag]
+        elif lag < 0:
+            a, b = X[:, : T + lag], X[:, -lag:]
+        else:
+            a, b = X, X
+        c = _ccc_pairs(a, b)
+        best = np.maximum(best, np.where(np.isnan(c), -np.inf, c))
+    out = np.where(np.isinf(best), 0.0, best)
+    # Mirror upper->lower so [i][j] == [j][i] exactly (the loop set both from the
+    # i<j value; max-over-symmetric-lags is symmetric, but pin it to be safe).
+    il = np.tril_indices(n, -1)
+    out[il] = out.T[il]
+    np.fill_diagonal(out, 1.0)
+    return out
+
+
+def _plv_matrix(ph_series: list[np.ndarray]) -> np.ndarray:
+    """Vectorized pairwise phase-locking value: |mean over both-finite samples of
+    exp(i(phi_i - phi_j))|. One complex matmul (z @ conj(z).T) gives every pair's
+    sum at once. 0 where <3 paired samples; diagonal 1.0. Returns N×N."""
+    n = len(ph_series)
+    if n == 0:
+        return np.zeros((0, 0))
+    P = np.vstack(ph_series).astype(float)
+    m = np.isfinite(P)
+    z = np.where(m, np.exp(1j * np.where(m, P, 0.0)), 0.0)  # unit phasors, 0 at NaN
+    mf = m.astype(float)
+    npair = mf @ mf.T
+    s = z @ np.conj(z).T
+    with np.errstate(invalid="ignore", divide="ignore"):
+        plv = np.abs(s) / npair
+    plv = np.where(npair >= 3, plv, 0.0)
+    np.fill_diagonal(plv, 1.0)
+    return plv
+
+
 def compute(sessions, now: float, cfg: dict) -> dict:
     proc = cfg["processing"]
     window = proc["sync_window"]
@@ -127,34 +204,16 @@ def compute(sessions, now: float, cfg: dict) -> dict:
 
     n = len(people)
     ids = [s.person_id for s in people]
-    matrix = [[0.0] * n for _ in range(n)]
-    plv = [[0.0] * n for _ in range(n)]
 
-    pair_ccc = []
-    pair_plv = []
-    for i in range(n):
-        matrix[i][i] = 1.0
-        plv[i][i] = 1.0
-        for j in range(i + 1, n):
-            xi, xj = hr_series[i], hr_series[j]
-            if max_lag > 0:
-                c, _ = best_lag_ccc(xi, xj, max_lag)
-            else:
-                m = np.isfinite(xi) & np.isfinite(xj)
-                c = ccc(xi[m], xj[m]) if m.sum() >= 3 else 0.0
-            matrix[i][j] = matrix[j][i] = c
-            pair_ccc.append(c)
+    # Vectorized pairwise CCC (max over lags) + PLV — one batch of matmuls each,
+    # equivalent to the old per-pair best_lag_ccc/PLV double loop (see helpers).
+    ccc_m = _ccc_matrix(hr_series, max_lag)
+    plv_m = _plv_matrix(ph_series)
+    matrix = ccc_m.tolist()
+    plv = plv_m.tolist()
 
-            pi, pj = ph_series[i], ph_series[j]
-            pm = np.isfinite(pi) & np.isfinite(pj)
-            if pm.sum() >= 3:
-                p = float(np.abs(np.mean(np.exp(1j * (pi[pm] - pj[pm])))))
-            else:
-                p = 0.0
-            plv[i][j] = plv[j][i] = p
-            pair_plv.append(p)
-
-    cohesion = float(np.mean(pair_ccc)) if pair_ccc else 0.0
+    pair_ccc = ccc_m[np.triu_indices(n, 1)] if n >= 2 else np.empty(0)
+    cohesion = float(np.mean(pair_ccc)) if pair_ccc.size else 0.0
     order_param = _kuramoto_order(ph_series, grid) if n >= 2 else 0.0
 
     return {

@@ -133,8 +133,9 @@ O(N²)), so the fixed-cadence frame loop drops to ~3 Hz. Root cause: 435 pairs e
 ±8-sample lag sweep (`sync_max_lag`), recomputed EVERY frame. Fix directions (cheapest first):
 (1) **decouple synchrony from the visual frame** — recompute it at ~1-2 Hz, not 10 Hz (it's
 slow-changing; the puddle already smooths); (2) drop/adapt `sync_max_lag` for large N; (3)
-vectorize the pairwise CCC (numpy batch vs. the Python 435-pair loop). Any one of these
-restores 10 Hz.
+vectorize the pairwise CCC (numpy batch vs. the Python 435-pair loop).
+
+**DONE — synchrony vectorized** (masked-matmul CCC/PLV, max-over-lags): pairwise CCC 125.8 ms -> 0.93 ms at N=30 (~135x), numerically identical to the loop (max diff ~1e-15, regression-tested). End-to-end frame rate 3.0 -> 5.5 Hz, CPU 53% -> 40%. **New bottleneck:** the remaining ~82 ms/frame is per-person resampling in `build_frame` (current_hr / windowed_hr_std / rmssd / phase each resample the window, x30 people, partly duplicated with synchrony's prep). Next: share one resampled grid per person per frame across those + synchrony, and/or recompute the heavy metrics at a lower cadence than the 10 Hz visual frame.
 
 **Gateway BLE ceiling: 3 on the Arduino toolchain → 6 validated on the ESP-IDF port.**
 Arduino hardware test with 6 bands: the gateway saw all 6 but only 3 subscribed; the 4th+
