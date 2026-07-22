@@ -125,6 +125,17 @@ Flashing and configuring many gateways; over-the-air firmware updates.
 The actual target. Validate processing/synchrony throughput, the Show puddle at ~30 dots,
 and MQTT message volume at scale. May surface tuning work in `processing/` and the frontend.
 
+**Measured (isolated 5-gateway mock fleet + 30-person sim capture, no hardware):** the
+gateway/MQTT/orchestration path holds fine — 30/30 bands placed across 5 managed gateways,
+~33 HR msg/s ingested. **But the app does NOT sustain the 10 Hz frame loop at 30 people:**
+`synchrony.compute()` alone is ~149 ms/frame at N=30 (9 ms at N=6, 42 ms at N=15 — clean
+O(N²)), so the fixed-cadence frame loop drops to ~3 Hz. Root cause: 435 pairs each running a
+±8-sample lag sweep (`sync_max_lag`), recomputed EVERY frame. Fix directions (cheapest first):
+(1) **decouple synchrony from the visual frame** — recompute it at ~1-2 Hz, not 10 Hz (it's
+slow-changing; the puddle already smooths); (2) drop/adapt `sync_max_lag` for large N; (3)
+vectorize the pairwise CCC (numpy batch vs. the Python 435-pair loop). Any one of these
+restores 10 Hz.
+
 **Gateway BLE ceiling: 3 on the Arduino toolchain → 6 validated on the ESP-IDF port.**
 Arduino hardware test with 6 bands: the gateway saw all 6 but only 3 subscribed; the 4th+
 got repeated `connect FAILED`. The limit was the precompiled BT controller's concurrent-ACL
