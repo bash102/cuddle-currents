@@ -77,6 +77,11 @@ Both provision Wi-Fi + broker at runtime via a captive portal (no Wi-Fi credenti
 repo). Rough sizing: ~`ceil(people / 6)` IDF gateways (≈5 for 30 people). See each firmware
 README for the toolchain, build, flash, and provisioning steps.
 
+**Over-the-air updates.** After the initial USB flash, the whole IDF-gateway fleet updates
+over Wi-Fi — bump `version.txt`, `idf.py build`, then push via the Ops "Update fleet" button
+(or `POST /api/ota`); each gateway pulls, flashes, and auto-rolls-back if the new image can't
+get healthy. Full steps in the [gateway OTA section](firmware/gateway-idf/README.md#ota-updates).
+
 ## Quick start
 
 ```bash
