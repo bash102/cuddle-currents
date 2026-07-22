@@ -719,8 +719,14 @@ void setup() {
   NimBLEDevice::init(g_gwid.c_str());
   NimBLEDevice::setPower(9);  // +9 dBm (2.x takes dBm, not the ESP_PWR_LVL_* enum)
   NimBLEScan* scan = NimBLEDevice::getScan();
-  scan->setScanCallbacks(new ScanCB(), /*wantDuplicates=*/false);
+  // wantDuplicates=TRUE is required for managed mode: the controller's duplicate filter
+  // (with dup-cache refresh period 0) would otherwise report each band only ONCE, so a
+  // continuously-advertising band drops out of `seen` after SEEN_TTL and can't be re-added
+  // until the scan restarts — leaving the orchestrator nothing to place. Reporting every
+  // advertisement keeps `seen`/`last_seen` continuously fresh.
+  scan->setScanCallbacks(new ScanCB(), /*wantDuplicates=*/true);
   scan->setActiveScan(true);
+  scan->setDuplicateFilter(false);  // belt-and-suspenders with wantDuplicates above
   scan->setInterval(100);
   scan->setWindow(80);
   scan->start(0, false);  // continuous background scan (2.x: duration, isContinue)
