@@ -43,6 +43,46 @@ def test_seq_increments_per_device():
     assert seqs == [1, 2, 3]
 
 
+def test_multiconnect_dedup_drops_non_holder_gateway_hr(monkeypatch):
+    # A multi-connect band (e.g. Scosche Rhythm+) publishes HR via two gateways at once;
+    # only the holder's beats emit samples, so the person doesn't double-count every beat.
+    t = [1000.0]
+    monkeypatch.setattr(mqtt_mod.clock, "now", lambda: t[0])
+    s = _src()
+    frame = encode_hr_measurement(70)
+
+    s._handle_message("cuddle/gw1/hr/AA:BB", frame)  # gw1 sends first -> holder, emits
+    assert s._queue.qsize() == 1
+    s._queue.get_nowait()
+
+    t[0] += 0.5
+    s._handle_message("cuddle/gw2/hr/AA:BB", frame)  # gw2 duplicate while gw1 fresh -> dropped
+    assert s._queue.qsize() == 0
+
+    t[0] += 0.5
+    s._handle_message("cuddle/gw1/hr/AA:BB", frame)  # holder keeps emitting
+    assert s._queue.qsize() == 1
+
+
+def test_multiconnect_dedup_fails_over_when_holder_goes_silent(monkeypatch):
+    t = [1000.0]
+    monkeypatch.setattr(mqtt_mod.clock, "now", lambda: t[0])
+    s = _src()  # hr_holder_ttl default 3.0
+    frame = encode_hr_measurement(70)
+
+    s._handle_message("cuddle/gw1/hr/AA:BB", frame)  # gw1 holder
+    s._queue.get_nowait()
+
+    t[0] += 3.5  # gw1 silent past hr_holder_ttl
+    s._handle_message("cuddle/gw2/hr/AA:BB", frame)  # gw2 takes over, emits
+    assert s._queue.qsize() == 1
+    assert s._queue.get_nowait().device_id == "AA:BB"
+
+    t[0] += 0.5
+    s._handle_message("cuddle/gw1/hr/AA:BB", frame)  # now gw1 is the duplicate -> dropped
+    assert s._queue.qsize() == 0
+
+
 def test_malformed_hr_payload_is_ignored():
     s = _src()
     s._handle_message("cuddle/gw1/hr/AA:BB", b"\x00")  # too short for a valid frame

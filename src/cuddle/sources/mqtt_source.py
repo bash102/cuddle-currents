@@ -31,6 +31,7 @@ class GatewayMqttSource:
         drop_after: float = 20.0,
         evict_after: float = 120.0,
         stale_after_rr_factor: float = 2.5,
+        hr_holder_ttl: float = 3.0,
     ) -> None:
         self._broker = broker
         self._port = port
@@ -38,10 +39,16 @@ class GatewayMqttSource:
         self._drop_after = drop_after
         self._evict_after = evict_after
         self._stale_after_rr_factor = stale_after_rr_factor
+        # A multi-connect band (e.g. Scosche Rhythm+) can be connected to two gateways at
+        # once, so both publish its HR. We accept beats from only ONE gateway per device (the
+        # "holder"); a different gateway's beats are dropped as duplicates. If the holder goes
+        # silent for hr_holder_ttl, the next gateway to send HR takes over (failover).
+        self._hr_holder_ttl = hr_holder_ttl
 
         self._queue: asyncio.Queue[NormalizedSample] = asyncio.Queue()
         self._states: dict[str, ConnectionState] = {}
         self._bindings: dict[str, str] = {}  # device_id -> person_id
+        self._hr_holder: dict[str, tuple[str, float]] = {}  # device_id -> (gateway, last hr time)
         self._seq: dict[str, int] = {}
         self._last_hr: dict[str, int] = {}
         self._rssi: dict[str, int | None] = {}
@@ -94,6 +101,13 @@ class GatewayMqttSource:
         self._last_hr[dev] = m.hr_bpm
         self._last_seen[dev] = now
         self._states[dev] = ConnectionState.connected  # beats imply a live link
+        # Multi-connect dedup: accept beats from only one gateway per device. A different
+        # gateway's beats are dropped while the holder is fresh (else the person double-counts
+        # every beat, corrupting HR/RMSSD). Connection state above stays fresh either way.
+        holder = self._hr_holder.get(dev)
+        if holder is not None and holder[0] != gw and (now - holder[1]) <= self._hr_holder_ttl:
+            return
+        self._hr_holder[dev] = (gw, now)
         self._route_device(dev, gw)
         self._seq[dev] = self._seq.get(dev, 0) + 1
         person_id = self._bindings.get(dev, dev)
@@ -165,7 +179,8 @@ class GatewayMqttSource:
         ]
 
     def _evict(self, dev: str) -> None:
-        for d in (self._states, self._seq, self._last_hr, self._rssi, self._last_seen, self._device_gw):
+        for d in (self._states, self._seq, self._last_hr, self._rssi, self._last_seen,
+                  self._device_gw, self._hr_holder):
             d.pop(dev, None)
         for s in self._gw_devices.values():
             s.discard(dev)
