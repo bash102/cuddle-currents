@@ -40,6 +40,7 @@
 #include <Preferences.h>
 #include <PubSubClient.h>
 #include <NimBLEDevice.h>
+#include "esp_app_desc.h"   // esp_app_get_description()->version (from version.txt)
 #include "secrets.h"
 
 // arduino-esp32's initArduino() FREES the BLE controller RAM at startup unless bleInUse()
@@ -661,6 +662,7 @@ static const unsigned long REPORT_HEARTBEAT_MS = 2000;
 static String buildReportBody() {
   String s = "{\"capacity\":" + String(MAX_CONNECTIONS) +
              ",\"mode\":\"" + (effectiveManaged() ? "managed" : "opportunistic") + "\"" +
+             ",\"version\":\"" + String(esp_app_get_description()->version) + "\"" +
              ",\"connected\":[";
   for (int i = 0; i < heldCount; i++) {
     if (i > 0) s += ",";
