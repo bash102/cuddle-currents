@@ -85,7 +85,13 @@
         display: inline-block; width: 8px; height: 8px; border-radius: 50%;
         background: var(--bad); flex: none;
       }
-      .gwcard .gwid { font-weight: 600; }
+      .gwcard .gwid { font-weight: 600; cursor: pointer; }
+      .gwrename { font-size: 11px; padding: 1px 6px; line-height: 1; }
+      .gwrenameinput {
+        min-width: 0; max-width: 150px; font-weight: 600;
+        background: var(--field); border: 1px solid var(--border);
+        color: var(--text); border-radius: 6px; padding: 2px 6px;
+      }
       .badge {
         font-size: 10px; text-transform: uppercase; letter-spacing: .04em;
         color: var(--muted); border: 1px solid var(--border); border-radius: 999px;
