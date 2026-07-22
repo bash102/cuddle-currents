@@ -21,6 +21,15 @@ from cuddle.core.models import Source
 def build_engine(args) -> Engine:
     cfg = load_config(args.config)
 
+    # Fold --host/--port into the transport config BEFORE constructing the
+    # Engine, so its OTA URL detection sees the SAME bind host uvicorn will use
+    # (main() binds cfg["transport"]["host"]). Without this the Engine only ever
+    # saw the app.yaml default and could never detect a LAN-reachable OTA URL.
+    if args.host is not None:
+        cfg["transport"]["host"] = args.host
+    if args.port is not None:
+        cfg["transport"]["port"] = args.port
+
     if args.source == "sim":
         from cuddle.sources.sim_source import SimulatorSource
 

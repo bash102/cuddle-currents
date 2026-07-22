@@ -49,10 +49,13 @@ def is_routable_host(ip: str) -> bool:
     return not (addr.is_loopback or addr.is_unspecified)
 
 
-def detect_lan_ip(target: tuple[str, int]) -> str | None:
-    """The local IP of the interface that routes toward `target` (e.g. the
-    broker). A connected UDP socket sends no packets; getsockname reveals the
-    chosen source address."""
+def detect_lan_ip(target: tuple[str, int] = ("8.8.8.8", 80)) -> str | None:
+    """This host's primary LAN IP. A connected UDP socket sends no packets;
+    getsockname reveals the source address the OS would route toward `target`
+    -- i.e. the default-route (LAN) interface. `target` defaults to a public
+    address so this resolves the real LAN IP even when the MQTT broker runs on
+    localhost (targeting a local broker resolves to 127.0.0.1 and yields
+    nothing useful). No traffic is sent; only a route lookup happens."""
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     try:
         s.connect(target)
@@ -62,6 +65,23 @@ def detect_lan_ip(target: tuple[str, int]) -> str | None:
         return None
     finally:
         s.close()
+
+
+def ota_url_base_for_host(host: str, port: int) -> str | None:
+    """Base URL gateways use to fetch firmware, given the app's HTTP bind host.
+
+    - all-interfaces (`0.0.0.0`/`::`/empty) -> discover this host's LAN IP.
+    - a specific routable host -> use it verbatim.
+    - loopback-only (`127.0.0.1`) -> None: gateways on the LAN can't reach
+      loopback, so refuse rather than publish an unreachable OTA URL.
+    """
+    if host in ("0.0.0.0", "::", ""):
+        lan = detect_lan_ip()
+    elif is_routable_host(host):
+        lan = host
+    else:
+        lan = None
+    return f"http://{lan}:{port}" if lan else None
 
 
 def safe_firmware_name(version: str) -> str:

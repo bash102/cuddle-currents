@@ -47,3 +47,34 @@ def test_safe_firmware_name_ok():
 def test_safe_firmware_name_rejects_unsafe(bad):
     with pytest.raises(ValueError):
         ota.safe_firmware_name(bad)
+
+
+# --- OTA URL base selection (bug B fix) ---
+
+
+def test_ota_url_base_for_host_routable():
+    assert ota.ota_url_base_for_host("192.168.1.50", 8770) == "http://192.168.1.50:8770"
+
+
+@pytest.mark.parametrize("host", ["127.0.0.1", "::1", ""])
+def test_ota_url_base_for_host_loopback_or_empty_is_none(host, monkeypatch):
+    # loopback-only bind can't be reached by gateways -> refuse (empty string
+    # is treated as all-interfaces, so force detect_lan_ip to None for it)
+    monkeypatch.setattr(ota, "detect_lan_ip", lambda *a, **k: None)
+    assert ota.ota_url_base_for_host(host, 8770) is None
+
+
+def test_ota_url_base_for_host_all_interfaces_uses_detected_lan_ip(monkeypatch):
+    monkeypatch.setattr(ota, "detect_lan_ip", lambda *a, **k: "192.168.1.77")
+    assert ota.ota_url_base_for_host("0.0.0.0", 8770) == "http://192.168.1.77:8770"
+
+
+def test_ota_url_base_for_host_all_interfaces_none_when_no_lan(monkeypatch):
+    monkeypatch.setattr(ota, "detect_lan_ip", lambda *a, **k: None)
+    assert ota.ota_url_base_for_host("0.0.0.0", 8770) is None
+
+
+def test_detect_lan_ip_never_returns_loopback():
+    # env-dependent value, but it must never be a loopback/unspecified address
+    ip = ota.detect_lan_ip()
+    assert ip is None or ota.is_routable_host(ip)

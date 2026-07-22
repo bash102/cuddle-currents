@@ -87,22 +87,15 @@ class Engine:
         self.ota_url_base = self._detect_ota_url_base()
 
     def _detect_ota_url_base(self) -> str | None:
-        # `cfg` may be a partial dict handed straight to a test (bypassing
-        # load_config's defaults) -- fall back to the same defaults
-        # core/config.py uses rather than KeyError on a missing section.
-        mq = self.cfg.get("mqtt", {})
+        # The URL gateways fetch firmware from depends on the app's HTTP bind
+        # host (propagated from --host into cfg["transport"]["host"] by cli.py):
+        # all-interfaces -> discover the LAN IP; a routable host -> use it;
+        # loopback-only -> None. `cfg` may be a partial dict handed straight to
+        # a test, so fall back to core/config.py's defaults on a missing section.
         transport = self.cfg.get("transport", {})
-        broker = mq.get("broker", "127.0.0.1")
-        broker_port = mq.get("port", 1883)
-        transport_host = transport.get("host", "127.0.0.1")
-        transport_port = transport.get("port", 8770)
-
-        host = ota_helpers.detect_lan_ip((broker, broker_port))
-        if host is None and ota_helpers.is_routable_host(transport_host):
-            host = transport_host
-        if host is None:
-            return None
-        return f"http://{host}:{transport_port}"
+        host = transport.get("host", "127.0.0.1")
+        port = transport.get("port", 8770)
+        return ota_helpers.ota_url_base_for_host(host, port)
 
     async def start(self) -> None:
         self.enrollment.load()
