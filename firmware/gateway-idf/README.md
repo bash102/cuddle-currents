@@ -122,10 +122,11 @@ Gateways receive firmware updates via MQTT-triggered pull:
 4. **App accessibility**: The app must run with `--host 0.0.0.0` so gateways on the same LAN
    can reach the image URL. Localhost-only bindings will cause OTA to fail for remote devices.
 
-5. **First rollback-enabled build**: The partition table and bootloader were redesigned to
-   support dual-slot OTA. If flashing an image older than or concurrent with the first OTA-
-   capable build, use USB + `idf.py flash` (rollback slots don't exist yet). Once that image
-   is on the device, all later OTA updates use the dual-slot mechanism.
+5. **First rollback-enabled build**: The dual-slot OTA partition table (`ota_0`/`ota_1` +
+   `otadata`) has existed since the first IDF build; the first rollback-enabled build only adds
+   the bootloader rollback config (`CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE`), which the
+   bootloader must be reflashed once over USB (`idf.py flash`) to pick up. Once a
+   rollback-capable image is on the device, all later OTA updates are protected.
 
 6. **Auto-rollback health gate**: The gateway enters a health-check window after OTA: if it
    cannot reach MQTT within ~60s, it auto-reverts to the previous slot and reboots. This
