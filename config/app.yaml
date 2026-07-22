@@ -64,3 +64,4 @@ orchestrator:
   coverage_ttl: 60.0
   rebalance_cooldown: 10.0
   evict_cooldown: 10.0
+  settle_window: 4.0           # wait ~2 report cycles so every gateway reports a new band before placing it

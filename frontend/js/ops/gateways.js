@@ -25,6 +25,60 @@ const pinnedLocally = new Set();
 // operator's own toggles locally from there.
 let globalMode = null;
 
+// Gateway display aliases are an Ops-UI-only convenience so an operator can
+// tell which physical gateway is which ("Living Room" vs esp32-01-a172e0).
+// They live in localStorage keyed by gateway id -- never sent to the backend
+// or persisted on the gateway, so they cost nothing on the wire and the
+// canonical id stays the source of truth (shown on hover).
+const ALIAS_KEY = "cuddle.gwAliases";
+
+function loadAliases() {
+  try {
+    return JSON.parse(localStorage.getItem(ALIAS_KEY)) || {};
+  } catch {
+    return {};
+  }
+}
+
+function saveAlias(gwId, alias) {
+  const aliases = loadAliases();
+  if (alias) aliases[gwId] = alias;
+  else delete aliases[gwId]; // empty input clears the alias -> revert to id
+  localStorage.setItem(ALIAS_KEY, JSON.stringify(aliases));
+}
+
+function gwDisplayName(gwId) {
+  return loadAliases()[gwId] || gwId;
+}
+
+// Swap the gateway's name span for an input to rename it in place. Enter or
+// blur commits (empty clears), Escape cancels; the label then reverts to the
+// alias-or-id and keeps the canonical id on hover.
+function startRename(node) {
+  if (node.id.parentNode == null) return; // already editing / detached
+  const input = document.createElement("input");
+  input.className = "gwrenameinput";
+  input.value = loadAliases()[node.gwId] || "";
+  input.placeholder = node.gwId;
+  let done = false;
+  const finish = (save) => {
+    if (done) return;
+    done = true;
+    if (save) saveAlias(node.gwId, input.value.trim());
+    node.id.textContent = gwDisplayName(node.gwId);
+    node.id.title = node.gwId;
+    input.replaceWith(node.id);
+  };
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") finish(true);
+    else if (e.key === "Escape") finish(false);
+  });
+  input.addEventListener("blur", () => finish(true));
+  node.id.replaceWith(input);
+  input.focus();
+  input.select();
+}
+
 function inferMode(gateways) {
   if (!gateways.length) return "managed";
   const managed = gateways.filter((g) => g.mode === "managed").length;
@@ -182,6 +236,7 @@ function makeGatewayCard() {
     <div class="cardhead">
       <span class="dot"></span>
       <span class="name gwid"></span>
+      <button class="gwrename" title="rename this gateway (local label only)">✎</button>
       <span class="badge gwmode"></span>
       <span class="grow"></span>
       <span class="gwcap"></span>
@@ -200,6 +255,7 @@ function makeGatewayCard() {
     root,
     dot: root.querySelector(".dot"),
     id: root.querySelector(".gwid"),
+    rename: root.querySelector(".gwrename"),
     mode: root.querySelector(".gwmode"),
     cap: root.querySelector(".gwcap"),
     connectedWrap: root.querySelector(".gwconnected"),
@@ -262,10 +318,18 @@ export function renderGateways(frame) {
     let node = gatewayNodes.get(gw.id);
     if (!node) {
       node = makeGatewayCard();
+      node.gwId = gw.id;
+      node.rename.addEventListener("click", () => startRename(node));
+      node.id.addEventListener("click", () => startRename(node));
       gatewayNodes.set(gw.id, node);
       wrap.appendChild(node.root);
     }
-    node.id.textContent = gw.id;
+    // Show the operator's local alias if set, else the canonical id; keep the
+    // real id on hover. Skipped while a rename input is active (id detached).
+    if (node.id.parentNode) {
+      node.id.textContent = gwDisplayName(gw.id);
+      node.id.title = gw.id;
+    }
     node.dot.style.background = gw.online ? "var(--good)" : "var(--bad)";
     node.dot.title = gw.online ? "online" : "offline";
     node.mode.textContent = gw.mode;

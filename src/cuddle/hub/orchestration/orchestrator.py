@@ -58,6 +58,7 @@ class Orchestrator:
         coverage_ttl: float = 60.0,
         rebalance_cooldown: float = 10.0,
         evict_cooldown: float = 10.0,
+        settle_window: float = 4.0,
     ) -> None:
         self._store = store
         self._broker = broker
@@ -69,6 +70,7 @@ class Orchestrator:
         self._coverage_ttl = coverage_ttl
         self._rebalance_cooldown = rebalance_cooldown
         self._evict_cooldown = evict_cooldown
+        self._settle_window = settle_window
 
         self._world = WorldModel()
         self._pending: dict[str, Pending] = {}
@@ -174,7 +176,7 @@ class Orchestrator:
 
     def _run_plan(self, now: float, *, allow_rebalance: bool) -> list[Cmd]:
         pinned = self._pinned() | self._manual_pins
-        cfg = PlanCfg(coverage_ttl=self._coverage_ttl)
+        cfg = PlanCfg(coverage_ttl=self._coverage_ttl, settle_window=self._settle_window)
 
         # Prune expired evictions and build the still-live evicted map to
         # pass into plan() -- a gw whose eviction deadline has passed is

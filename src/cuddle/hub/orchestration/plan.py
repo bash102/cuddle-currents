@@ -47,6 +47,11 @@ class Pending:
 @dataclass
 class PlanCfg:
     coverage_ttl: float = 60.0
+    # Hold off placing a freshly-appeared advertiser until it has been seen for
+    # at least this long, so every in-range gateway has reported its RSSI and
+    # the strongest is chosen (rather than whichever gateway happened to report
+    # first). 0.0 disables the hold-off (immediate placement).
+    settle_window: float = 0.0
 
 
 def _rssi_key(rssi: int | None) -> int:
@@ -123,6 +128,16 @@ def plan(
     deferred_pinned: list[str] = []
     deferred_unpinned: list[str] = []
 
+    def settled(dev: str) -> bool:
+        """False while `dev` is advertising but hasn't been observed long
+        enough for every in-range gateway to have reported it (see
+        `PlanCfg.settle_window`). A not-yet-settled band is neither placed nor
+        surfaced unserved this tick -- it simply waits for a later one."""
+        if cfg.settle_window <= 0:
+            return True
+        first = world.first_seen_adv.get(dev)
+        return first is not None and now - first >= cfg.settle_window
+
     def try_place(dev: str) -> bool:
         """Connect `dev` to the strongest eligible gw with a free slot, if
         any -- excluding any gw `dev` is currently evicted from. Mutates
@@ -153,12 +168,16 @@ def plan(
         if dev not in adv:
             unserved.append({"dev": dev, "rssi": None, "reason": "waiting_to_advertise"})
             continue
+        if not settled(dev):
+            continue
         if not try_place(dev):
             deferred_pinned.append(dev)
 
     # Step 3: connect-time placement for unpinned devs, using what's left.
     for dev in sorted(adv.keys()):
         if dev in pinned or dev in active_pending:
+            continue
+        if not settled(dev):
             continue
         if not try_place(dev):
             deferred_unpinned.append(dev)
