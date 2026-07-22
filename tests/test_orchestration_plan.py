@@ -36,6 +36,25 @@ def test_single_advertising_band_one_managed_gw_gets_connected():
     assert unserved == []
 
 
+def test_band_connected_on_two_gateways_released_from_weaker():
+    # A multi-connect band (e.g. Scosche Rhythm+) keeps advertising while connected, so
+    # opportunistic gateways all grab it -> it ends up connected on two gateways. plan()
+    # keeps the strongest-RSSI gateway and releases the band from the other(s), and never
+    # re-connects an already-connected band.
+    world = WorldModel()
+    world.apply_report("gwA", _payload(connected=[{"dev": "bandX", "rssi": -97}]), now=100.0)
+    world.apply_report("gwB", _payload(connected=[{"dev": "bandX", "rssi": -91}]), now=100.0)
+
+    cmds, unserved, evictions = plan(
+        world, pinned=set(), pending={}, cfg=PlanCfg(), now=100.0, allow_rebalance=False
+    )
+
+    assert Cmd(gw="gwA", action="release", dev="bandX") in cmds  # weaker link dropped
+    assert Cmd(gw="gwB", action="release", dev="bandX") not in cmds  # strongest kept
+    assert not any(c.action == "connect" for c in cmds)  # never reconnect a connected dev
+    assert evictions == []  # a dedup release is not a rebalance eviction
+
+
 def test_stronger_rssi_wins_tie_broken_by_fewer_connected():
     # Scenario A: different RSSI -> stronger (numerically greater, i.e. less
     # negative) signal wins.
