@@ -41,6 +41,7 @@
 #include <PubSubClient.h>
 #include <NimBLEDevice.h>
 #include "esp_app_desc.h"   // esp_app_get_description()->version (from version.txt)
+#include "esp_ota_ops.h"   // rollback: mark-app-valid / running-partition state
 #include "secrets.h"
 
 // arduino-esp32's initArduino() FREES the BLE controller RAM at startup unless bleInUse()
@@ -594,6 +595,16 @@ static void mqttCallback(char* topic, uint8_t* payload, unsigned int length) {
   }
 }
 
+// Rollback health gate: when this boot is a freshly-OTA'd image the bootloader
+// leaves it PENDING_VERIFY. We commit it (cancel rollback) only once MQTT has
+// been continuously up for OTA_HEALTHY_MS; if it never gets there within
+// OTA_VERIFY_DEADLINE_MS we reboot, and the rollback-enabled bootloader falls
+// back to the previous slot. A committed/normal boot skips all of this.
+static const unsigned long OTA_HEALTHY_MS = 10000;         // MQTT up this long = healthy
+static const unsigned long OTA_VERIFY_DEADLINE_MS = 60000; // else revert
+static bool g_pendingVerify = false;   // is this boot an un-committed OTA image?
+static unsigned long g_mqttUpSince = 0; // millis() when MQTT last became connected (0 = down)
+
 static unsigned long lastMqttTry = 0;
 static void ensureMqtt() {
   if (mqtt.connected()) return;
@@ -746,6 +757,16 @@ void setup() {
   scan->setWindow(80);
   scan->start(0, false);  // continuous background scan (2.x: duration, isContinue)
   Serial.println("BLE scanning for 0x180D...");
+
+  {
+    const esp_partition_t* running = esp_ota_get_running_partition();
+    esp_ota_img_states_t st;
+    if (esp_ota_get_state_partition(running, &st) == ESP_OK &&
+        st == ESP_OTA_IMG_PENDING_VERIFY) {
+      g_pendingVerify = true;
+      Serial.println("OTA: running a pending-verify image; will commit once healthy");
+    }
+  }
 }
 
 void loop() {
@@ -753,6 +774,23 @@ void loop() {
   if (WiFi.status() != WL_CONNECTED) { WiFi.reconnect(); delay(500); return; }
   ensureMqtt();
   mqtt.loop();
+
+  // --- rollback health gate (only meaningful while pending-verify) ---
+  if (mqtt.connected()) {
+    if (g_mqttUpSince == 0) g_mqttUpSince = millis();
+  } else {
+    g_mqttUpSince = 0;
+  }
+  if (g_pendingVerify) {
+    if (g_mqttUpSince != 0 && millis() - g_mqttUpSince >= OTA_HEALTHY_MS) {
+      esp_ota_mark_app_valid_cancel_rollback();
+      g_pendingVerify = false;
+      Serial.println("OTA: image committed (healthy)");
+    } else if (millis() >= OTA_VERIFY_DEADLINE_MS) {
+      Serial.println("OTA: not healthy in time; rebooting to roll back");
+      esp_restart();
+    }
+  }
 
   // Perform any queued connects (kept out of the scan callback).
   ConnectReq req;
