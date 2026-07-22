@@ -217,6 +217,67 @@ static void pruneScanCache() {
   scanCount = w;
 }
 
+// ---- multi-gateway dedup (peer awareness via each other's `report`) ---------
+// A multi-connect band (e.g. Scosche Rhythm+) keeps advertising while connected, so every
+// in-range gateway grabs it and it ends up on more than one. Rather than rely on the app
+// commanding a release (fragile — address-format mismatches make it silently no-op), the
+// gateways coordinate directly: each subscribes to the others' `report`s and learns which
+// bands they hold. We then (a) never connect a band a peer already holds, and (b) if a
+// duplicate forms anyway (both connect within the report-interval race window), the
+// weaker-RSSI gateway drops its copy. Self-heals: a peer's holds expire if it stops
+// reporting (e.g. goes offline). Address compares are case-insensitive, so a format
+// difference between gateway firmwares can't defeat it.
+struct RemoteHold { String dev; String gw; int rssi; unsigned long ts; };
+static const int REMOTE_HOLD_MAX = 40;
+static RemoteHold remoteHeld[REMOTE_HOLD_MAX];
+static int remoteHeldCount = 0;
+static const unsigned long REMOTE_HOLD_TTL_MS = 8000;  // drop a peer's holds if it stops reporting
+
+static int remoteHolderOf(const String& dev) {  // index of a peer holding dev, else -1
+  for (int i = 0; i < remoteHeldCount; i++)
+    if (remoteHeld[i].dev.equalsIgnoreCase(dev)) return i;
+  return -1;
+}
+static void removeRemoteHoldsFor(const String& gw) {
+  int w = 0;
+  for (int i = 0; i < remoteHeldCount; i++)
+    if (remoteHeld[i].gw != gw) remoteHeld[w++] = remoteHeld[i];
+  remoteHeldCount = w;
+}
+static void pruneRemoteHeld(unsigned long now) {
+  int w = 0;
+  for (int i = 0; i < remoteHeldCount; i++)
+    if (now - remoteHeld[i].ts <= REMOTE_HOLD_TTL_MS) remoteHeld[w++] = remoteHeld[i];
+  remoteHeldCount = w;
+}
+
+// Refresh what peer gateway `gw` holds, parsed from its `report` payload's "connected" array.
+static void handleRemoteReport(const String& gw, const String& payload) {
+  unsigned long now = millis();
+  removeRemoteHoldsFor(gw);
+  int start = payload.indexOf("\"connected\":[");
+  if (start < 0) return;
+  int end = payload.indexOf(']', start);
+  if (end < 0) return;
+  int i = start;
+  while (i < end && remoteHeldCount < REMOTE_HOLD_MAX) {
+    int d = payload.indexOf("\"dev\":\"", i);
+    if (d < 0 || d >= end) break;
+    d += 7;
+    int de = payload.indexOf('"', d);
+    if (de < 0 || de > end) break;
+    String dev = payload.substring(d, de);
+    int rssi = -127;  // default weak; also covers "rssi":null
+    int r = payload.indexOf("\"rssi\":", de);
+    if (r >= 0 && r < end && payload.charAt(r + 7) != 'n')
+      rssi = payload.substring(r + 7, payload.indexOf('}', r)).toInt();
+    remoteHeld[remoteHeldCount++] = RemoteHold{dev, gw, rssi, now};
+    i = payload.indexOf('}', de);
+    if (i < 0) break;
+    i++;
+  }
+}
+
 // ---- topic helpers ---------------------------------------------------------
 static String hrTopic(const String& dev)     { return "cuddle/" + g_gwid + "/hr/" + dev; }
 static String statusTopic(const String& dev) { return "cuddle/" + g_gwid + "/status/" + dev; }
@@ -291,6 +352,11 @@ class ScanCB : public NimBLEScanCallbacks {
 static void connectTo(const char* addrStr, uint8_t type) {
   String addr(addrStr);
   if (isHeld(addr) || heldCount >= MAX_CONNECTIONS) return;
+  int rh = remoteHolderOf(addr);
+  if (rh >= 0 && remoteHeld[rh].gw != g_gwid) {  // a peer already holds it — don't double-connect
+    Serial.printf("BLE: %s already held by %s — not connecting\n", addrStr, remoteHeld[rh].gw.c_str());
+    return;
+  }
   addHeld(addr);  // reserve the slot up-front so scan doesn't double-queue
 
   NimBLEDevice::getScan()->stop();  // don't scan while establishing a link
@@ -324,6 +390,22 @@ static void releaseDevice(const String& dev) {
   }
   Serial.printf("cmd release: disconnecting %s\n", dev.c_str());
   c->disconnect();  // onDisconnect (EVT_DISCONNECTED) does the held[] cleanup
+}
+
+// Drop any band we hold that a stronger peer also holds. Both gateways run this; the loser
+// (weaker RSSI, ties broken by lower gateway id) releases, so exactly one keeps the band.
+static void resolveDuplicateHolds() {
+  for (int i = heldCount - 1; i >= 0; i--) {
+    int rh = remoteHolderOf(held[i].addr);
+    if (rh < 0 || remoteHeld[rh].gw == g_gwid) continue;
+    bool theyWin = (remoteHeld[rh].rssi > held[i].rssi) ||
+                   (remoteHeld[rh].rssi == held[i].rssi && remoteHeld[rh].gw < g_gwid);
+    if (theyWin) {
+      Serial.printf("dedup: %s also held by %s (rssi %d vs ours %d) — releasing ours\n",
+                    held[i].addr.c_str(), remoteHeld[rh].gw.c_str(), remoteHeld[rh].rssi, held[i].rssi);
+      releaseDevice(held[i].addr);
+    }
+  }
 }
 
 // Tiny hand-rolled extractor for {"action":"...","dev":"..."} — matches the
@@ -492,6 +574,9 @@ static void mqttCallback(char* topic, uint8_t* payload, unsigned int length) {
     // Repeats of the current state are a no-op — control/online is published
     // once, retained, not a heartbeat, so re-arriving "1" (e.g. re-delivered
     // on our own reconnect) must never reset anything.
+  } else if (t.startsWith("cuddle/") && t.endsWith("/report")) {
+    String gw = t.substring(7, t.length() - 7);  // "cuddle/<gw>/report" -> <gw>
+    if (gw != g_gwid) handleRemoteReport(gw, p);  // learn what peers hold (dedup)
   }
 }
 
@@ -509,6 +594,7 @@ static void ensureMqtt() {
     mqtt.subscribe(cmdTopic().c_str());
     mqtt.subscribe(MODE_TOPIC);
     mqtt.subscribe(ONLINE_TOPIC);
+    mqtt.subscribe("cuddle/+/report");  // peers' reports -> multi-gateway dedup
   } else {
     Serial.printf(" failed rc=%d\n", mqtt.state());
   }
@@ -666,6 +752,15 @@ void loop() {
   }
   pruneScanCache();
   maybePublishReport();
+
+  // Multi-gateway dedup, ~1 Hz (kept off the per-iteration hot path): expire stale peer
+  // holds, then drop any band a stronger peer also holds so exactly one gateway keeps it.
+  static unsigned long lastDedup = 0;
+  if (millis() - lastDedup > 1000) {
+    lastDedup = millis();
+    pruneRemoteHeld(millis());
+    resolveDuplicateHolds();
+  }
 
   // Keep scanning while we have spare capacity. In managed mode, scanning
   // stays on regardless of capacity — it's what keeps report.seen fresh for

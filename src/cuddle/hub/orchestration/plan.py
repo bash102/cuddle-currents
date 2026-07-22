@@ -140,24 +140,11 @@ def plan(
         free_slots[gw_id] -= 1
         return True
 
-    # Step 1: resolve duplicate connections. A multi-connect band (e.g. the Scosche
-    # Rhythm+, which keeps advertising while connected) gets grabbed by every in-range
-    # gateway in opportunistic mode and ends up connected on more than one -- wasting a
-    # slot and double-counting its HR at the source. Keep the strongest-RSSI gateway and
-    # release it from the others (only from gateways we actually command: managed + online).
-    # The kept link keeps streaming, so there is no data gap.
-    holders: dict[str, dict[str, int | None]] = {}
-    for gw_id, view in world.gateways.items():
-        for dev, rssi in view.connected.items():
-            holders.setdefault(dev, {})[gw_id] = rssi
-    for dev in sorted(holders):
-        gw_rssi = holders[dev]
-        if len(gw_rssi) < 2:
-            continue
-        keep = min(gw_rssi, key=lambda g: (-_rssi_key(gw_rssi[g]), g))
-        for gw_id in sorted(gw_rssi):
-            if gw_id != keep and gw_id in eligible_gws:
-                cmds.append(Cmd(gw=gw_id, action="release", dev=dev))
+    # NOTE: duplicate-connection dedup (a multi-connect band held by two gateways) is handled
+    # ON THE GATEWAYS now (they subscribe to each other's `report`s and the weaker-RSSI one
+    # drops the band), not here -- an app-issued `release` proved fragile (address-format
+    # mismatches silently no-op'd it). The source-side HR dedup (GatewayMqttSource) covers the
+    # brief race window and the data. So `plan()` does not emit dedup releases.
 
     # Step 2: pinned placement.
     for dev in sorted(pinned):
