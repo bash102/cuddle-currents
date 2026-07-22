@@ -42,6 +42,8 @@
 #include <NimBLEDevice.h>
 #include "esp_app_desc.h"   // esp_app_get_description()->version (from version.txt)
 #include "esp_ota_ops.h"   // rollback: mark-app-valid / running-partition state
+#include "esp_https_ota.h"
+#include "esp_http_client.h"
 #include "secrets.h"
 
 // arduino-esp32's initArduino() FREES the BLE controller RAM at startup unless bleInUse()
@@ -286,9 +288,19 @@ static String statusTopic(const String& dev) { return "cuddle/" + g_gwid + "/sta
 static String onlineTopic()                  { return "cuddle/" + g_gwid + "/online"; }
 static String cmdTopic()                     { return "cuddle/" + g_gwid + "/cmd"; }
 static String reportTopic()                  { return "cuddle/" + g_gwid + "/report"; }
+static String otaTopic()                     { return "cuddle/" + g_gwid + "/ota"; }
 // Orchestrator control topics are global (not gateway-scoped).
 static const char* MODE_TOPIC   = "cuddle/control/mode";
 static const char* ONLINE_TOPIC = "cuddle/control/online";
+static const char* OTA_CMD_TOPIC = "cuddle/control/ota";
+
+// Non-retained: phase ∈ {start,downloading,ok,failed,rejected}. Published at OTA start
+// and result so the app/ops UI can track a flash in progress without polling.
+static void publishOtaPhase(const char* phase, const String& version, const String& detail) {
+  String p = String("{\"phase\":\"") + phase + "\",\"version\":\"" + version +
+             "\",\"detail\":\"" + detail + "\"}";
+  mqtt.publish(otaTopic().c_str(), p.c_str(), false);   // NON-retained
+}
 
 // ---- BLE callbacks (run in the NimBLE host task) ---------------------------
 static void notifyCB(NimBLERemoteCharacteristic* chr, uint8_t* data, size_t len, bool isNotify) {
@@ -392,6 +404,41 @@ static void releaseDevice(const String& dev) {
   }
   Serial.printf("cmd release: disconnecting %s\n", dev.c_str());
   c->disconnect();  // onDisconnect (EVT_DISCONNECTED) does the held[] cleanup
+}
+
+// ---- cuddle/control/ota ------------------------------------------------------
+// Pull+flash a new image. Blocks for the download (seconds on a LAN); PubSubClient
+// keepalive may lapse mid-download and reconnect afterward — acceptable because we
+// reboot on success and the pre-flight "start" phase is already published. sha256 is
+// carried for integrity; esp_https_ota validates the image header + writes atomically
+// to the inactive slot, then we reboot into it (pending-verify -> Task 2 gate).
+static void runOta(const String& url, const String& version, const String& sha256) {
+  const char* cur = esp_app_get_description()->version;
+  if (version == String(cur)) {
+    publishOtaPhase("rejected", version, "same version");
+    Serial.printf("OTA: rejected (already running %s)\n", cur);
+    return;
+  }
+  publishOtaPhase("start", version, url);
+  Serial.printf("OTA: pulling %s -> %s\n", version.c_str(), url.c_str());
+
+  esp_http_client_config_t http = {};
+  http.url = url.c_str();
+  http.timeout_ms = 15000;
+  http.keep_alive_enable = true;
+  esp_https_ota_config_t cfg = {};
+  cfg.http_config = &http;
+
+  esp_err_t err = esp_https_ota(&cfg);
+  if (err == ESP_OK) {
+    publishOtaPhase("ok", version, "rebooting");
+    Serial.println("OTA: ok, rebooting");
+    delay(200);
+    esp_restart();
+  } else {
+    publishOtaPhase("failed", version, esp_err_to_name(err));
+    Serial.printf("OTA: failed: %s\n", esp_err_to_name(err));
+  }
 }
 
 // Drop any band we hold that a stronger peer also holds. Both gateways run this; the loser
@@ -558,6 +605,15 @@ static void mqttCallback(char* topic, uint8_t* payload, unsigned int length) {
   p.reserve(length);
   for (unsigned int i = 0; i < length; i++) p += (char)payload[i];
 
+  if (t == OTA_CMD_TOPIC) {
+    String url = jsonExtract(p, "url");
+    String version = jsonExtract(p, "version");
+    String sha256 = jsonExtract(p, "sha256");
+    if (url.length() && version.length()) runOta(url, version, sha256);
+    else Serial.println("OTA: malformed command (missing url/version)");
+    return;
+  }
+
   if (t == cmdTopic()) {
     String action = jsonExtract(p, "action");
     String dev = jsonExtract(p, "dev");
@@ -619,6 +675,7 @@ static void ensureMqtt() {
     mqtt.subscribe(cmdTopic().c_str());
     mqtt.subscribe(MODE_TOPIC);
     mqtt.subscribe(ONLINE_TOPIC);
+    mqtt.subscribe(OTA_CMD_TOPIC);
     mqtt.subscribe("cuddle/+/report");  // peers' reports -> multi-gateway dedup
   } else {
     Serial.printf(" failed rc=%d\n", mqtt.state());
