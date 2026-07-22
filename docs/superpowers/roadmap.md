@@ -159,15 +159,18 @@ Small, independent polish items (no dependencies; pick up any time):
 - **Ops HR charts: labeled axes.** Add x (time) and y (bpm) axes to the per-person HR charts.
 - **Ops: remove the orbiting circle.** Drop the orbiting-circle element/animation on the Ops
   page.
-- **Firmware: add RGB status LED.** *(Reviewed: the firmware currently drives no LED at all —
-  status is Serial + MQTT only. This is a greenfield add, not a fix.)* Add onboard-RGB status
-  indication via `rgbLedWrite(RGB_BUILTIN, r, g, b)` (generic `esp32s3` variant = NeoPixel on
-  **GPIO48**; confirm the pin on the actual board first — clones vary, some use 38 or have no
-  RGB). Drive a single `updateLed()` from `loop()` (never a BLE callback) off state the report
-  builder already tracks (`WiFi.status()`, `mqtt.connected()`, `heldCount`, `effectiveManaged()`,
-  portal flag). **Keep it dim** — low brightness (cap channel values ~≤24, well under the
-  default `RGB_BRIGHTNESS 64`). One LED ⇒ prioritize/multiplex states:
-  portal = pulsing blue · Wi-Fi connecting = yellow · MQTT down = orange · idle (MQTT ok, 0
-  bands) = dim green · ≥1 band = green (brightness/blinks ∝ count) · managed mode = blue
-  accent · error (BLE fault / publish failing) = red. Priority: error > portal > link-down >
-  band activity. ~30–50 lines, no new deps.
+- **Firmware: RGB status LED — DONE.** Onboard NeoPixel (GPIO48, `rgbLedWrite`, intentionally
+  dim — channels capped at 24) shows link/mode/load: yellow (Wi-Fi connecting) · blue (portal) ·
+  orange (MQTT down) · green (online/opportunistic, brighter with band count) · teal (managed).
+  `updateLed()` runs at the top of `loop()`, main task only.
+- **Firmware: fleet bring-up — DONE.** Gateway id auto-appends a per-chip MAC suffix (one image
+  → unique per board, e.g. `esp32-01-a172e0`), and optional compile-time `WIFI_SSID`/`WIFI_PASS`
+  in `secrets.h` let a freshly-flashed gateway auto-join with no captive portal.
+- **Firmware: OTA updates.** *(Reviewed: the flash is OTA-**ready** — dual 3 MB app slots
+  `ota_0`/`ota_1` + `otadata` on the 16 MB partition table — but **no OTA code exists**; updates
+  today are USB-only via `idf.py flash`.)* Add an over-the-air update path (no re-partitioning
+  needed). Options, easiest first: **ArduinoOTA** (already compiled into the build, just unused —
+  push over the LAN with `espota.py`); **`esp_https_ota`** (gateway pulls a `.bin` from an
+  HTTP(S) URL — good for a fleet); or an **MQTT-triggered pull** on a `cuddle/<gw>/ota` topic
+  (fits the existing control-topic pattern; update the whole fleet from the app). Do this before
+  a real multi-gateway rollout so you aren't USB-flashing ~5 gateways one at a time. (Milestone 5.)

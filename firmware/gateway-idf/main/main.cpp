@@ -339,11 +339,23 @@ static String jsonExtract(const String& json, const String& key) {
 }
 
 // ---- config + provisioning -------------------------------------------------
+
+// Last 24 bits of the chip's factory MAC as hex — a stable per-board suffix so a fleet
+// flashed from ONE image is auto-unique (MQTT topics key on <gw>, so two identically-named
+// gateways would collide on the broker).
+static String macSuffix() {
+  char buf[8];
+  snprintf(buf, sizeof(buf), "%06lx", (unsigned long)(ESP.getEfuseMac() & 0xFFFFFF));
+  return String(buf);
+}
+
 static void loadConfig() {
   prefs.begin("gwcfg", false);
   g_broker = prefs.getString("broker", MQTT_BROKER);
   g_port   = prefs.getInt("port", MQTT_PORT);
-  g_gwid   = prefs.getString("gwid", GATEWAY_ID);
+  // Default id = GATEWAY_ID + per-chip MAC suffix (auto-unique across a fleet). A name set
+  // explicitly via the portal (persisted in NVS under "gwid") is used verbatim.
+  g_gwid   = prefs.getString("gwid", String(GATEWAY_ID) + "-" + macSuffix());
 }
 
 static void saveConfig() {
@@ -378,6 +390,26 @@ static void provision() {
   bool forcePortal = true;  // build-time override for testing the portal without the button
 #else
   bool forcePortal = (digitalRead(BOOT_BUTTON) == LOW);
+#endif
+
+  // Fleet-friendly: if compile-time Wi-Fi creds are baked in (secrets.h) and the portal
+  // isn't forced, try them directly first, so a freshly-flashed gateway joins with no
+  // captive portal. Falls through to WiFiManager (saved creds / portal) if it doesn't connect.
+#if defined(WIFI_SSID)
+  if (!forcePortal && strlen(WIFI_SSID) > 0) {
+    setLed(LED_MAX, LED_MAX * 2 / 3, 0);  // yellow while connecting
+    Serial.printf("Wi-Fi: trying compile-time creds for '%s'...\n", WIFI_SSID);
+    WiFi.mode(WIFI_STA);
+    WiFi.begin(WIFI_SSID, WIFI_PASS);
+    for (int i = 0; i < 24 && WiFi.status() != WL_CONNECTED; i++) delay(500);  // ~12s
+    if (WiFi.status() == WL_CONNECTED) {
+      WiFi.setAutoReconnect(true);
+      Serial.printf("Wi-Fi ok %s (compile-time creds) | broker %s:%d | gateway %s\n",
+                    WiFi.localIP().toString().c_str(), g_broker.c_str(), g_port, g_gwid.c_str());
+      return;  // g_broker/g_port/g_gwid already loaded by loadConfig()
+    }
+    Serial.println("Wi-Fi: compile-time creds didn't connect; falling back to WiFiManager.");
+  }
 #endif
 
   WiFiManager wm;
