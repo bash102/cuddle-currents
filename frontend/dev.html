@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Cuddle Currents · Viz Dev Harness</title>
+    <link rel="stylesheet" href="/theme.css" />
+    <style>
+      html, body { margin: 0; height: 100%; background: #150a10; overflow: hidden; }
+      /* Pixi canvas mounts here — fills the window left of the 620px control panel. */
+      #stage { position: absolute; inset: 0 620px 0 0; }
+      #stage canvas { display: block; }
+    </style>
+  </head>
+  <body>
+    <div id="stage"></div>
+    <!-- Map the bare "pixi.js" specifier (used by pixi-filters) to the vendored build,
+         the same URL our own relative imports resolve to, so there's one Pixi instance. -->
+    <script type="importmap">
+      { "imports": { "pixi.js": "/vendor/pixi.min.mjs" } }
+    </script>
+    <script type="module">
+      import { startMockSource } from "./js/sim/mockSource.js";
+      import { mountControls } from "./js/sim/controls.js";
+      import { subscribe } from "./js/store.js";
+      import { startPixiApp } from "./js/show/pixiApp.js";
+
+      // Client-side simulated stream (no backend). The model feeds store.js exactly
+      // like the live /ws source, so every PixiJS preset works here unchanged.
+      const src = startMockSource({ hz: 10, people: 6 });
+      const panel = mountControls(src.model);
+      subscribe((f) => panel.update(f)); // drive the panel readouts at frame rate
+
+      const pix = await startPixiApp({ mount: document.getElementById("stage") });
+
+      // Expose for console tinkering.
+      window.sim = src;
+      window.pix = pix;
+    </script>
+  </body>
+</html>
