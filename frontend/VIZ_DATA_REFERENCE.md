@@ -275,11 +275,11 @@ A preset binds **reactions** to each (in `CFG.events`, edited in the Events pane
 - **location** — where it resolves: `node`, `cohort centroid`, or `world` (screen center).
 - **trigger** — `hit` (once, at the moment) or `continuous`/`modulate` (every frame the state holds).
 
-Each reaction has an **on/off toggle** and exposes the referenced item's **settings inline**: a
-particle reaction shows the **shared** system's params (Shape, Rate/Burst, Life…) — the *same*
-object the Particle Systems panel edits, not a copy, so a change there changes it everywhere; a filter reaction
-shows that instance's params (amplitude, wavelength… + Duration) — the center comes from `location`;
-a property reaction shows Amount + Duration.
+Each reaction has an **on/off toggle**. A **particle** reaction shows **no params here** — just a
+pointer to edit that system in the Particle Systems panel (a system is a shared, named thing, edited
+once, not per event). A **filter** reaction shows that instance's params (amplitude, wavelength… +
+Duration) — the center comes from `location`. A **property** reaction shows Amount + Duration. Filter
+and property params are stored **on the reaction**.
 
 Defaults: `activated → aura` (continuous, node), `joined → joinBurst` (hit) **+ shockwave** (hit,
 node — the ripple). Event filters are capped at 4 concurrent passes so a mass sync can't stack

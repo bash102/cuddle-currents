@@ -365,18 +365,15 @@ export async function startPixiApp({ mount }) {
     });
   }
 
-  // Expose the referenced item's settings inline under a reaction. Particle → the SHARED
-  // system's params (same object the Particle Systems panel edits). Filter → this instance's
+  // Expose the referenced item's settings inline under a reaction. Filter → this instance's
   // filter params (amplitude/…) + Duration, stored on the reaction. Property → Amount + Duration.
+  // Particle reactions show NO editable params here — a particle system is a shared, named thing
+  // edited once in the Particle Systems panel (or in the Pixi editor), not per event.
   function reactionSettings(r, box, systems) {
     if (!r.ref) return;
     const note = () => { const d = document.createElement("div"); d.className = "rxn-set"; return d; };
     if (r.type === "particle") {
-      const sys = systems[r.ref]; if (!sys) return;
-      const wrap = note(); wrap.textContent = "system settings (shared):"; box.appendChild(wrap);
-      const onEdit = () => current.applyParticles?.();
-      box.appendChild(makeControlRow({ key: "shape", label: "Shape", type: "select", options: ["scatter", "ring"], tip: "scatter = random directions · ring = radial ripple" }, sys, "r fp", onEdit));
-      for (const p of SYSTEM_PARAMS) { if (p.only && p.only !== sys.type) continue; box.appendChild(makeControlRow(p, sys, "r fp", onEdit)); }
+      const wrap = note(); wrap.textContent = "→ edit “" + (systems[r.ref]?.label || r.ref) + "” in Particle Systems"; box.appendChild(wrap);
     } else if (r.type === "filter") {
       const def = FILTERS[r.ref]; if (!def) return;
       r.params = r.params || {};
