@@ -100,6 +100,17 @@ const CSS = `
 #preset-ctrl .r .src.on { color: #7ad7c7; border-color: rgba(122,215,199,0.5); background: rgba(122,215,199,0.08); }
 #preset-ctrl .r .clr { flex: 0 0 auto; cursor: pointer; color: #8a7580; font-size: 11px; padding: 0 3px; user-select: none; }
 #preset-ctrl .r .clr:hover { color: #e0245e; }
+#preset-ctrl .r.pathrow { flex-wrap: wrap; }
+#preset-ctrl .r.pathrow > label { flex: 1 0 100%; margin-bottom: 3px; }
+#preset-ctrl .r.pathrow input[type=text] { flex: 1 1 60px; }
+#preset-ctrl .r .browse { flex: 0 0 auto; cursor: pointer; font-size: 12px; padding: 0 2px; opacity: .85; }
+#preset-ctrl .r .browse:hover { opacity: 1; }
+#preset-ctrl .assetmenu { margin: 2px 0 7px; background: #1a0e15; border: 1px solid rgba(255,255,255,0.14);
+  border-radius: 6px; max-height: 168px; overflow-y: auto; }
+#preset-ctrl .assetmenu .ai { padding: 3px 8px; cursor: pointer; font: 10px ui-monospace, Menlo, monospace;
+  color: #f2e4de; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#preset-ctrl .assetmenu .ai:hover { background: rgba(255,255,255,0.09); }
+#preset-ctrl .assetmenu .ai.gen { color: #9a8590; border-bottom: 1px solid rgba(255,255,255,0.08); }
 #preset-ctrl .r.ta { align-items: flex-start; }
 #preset-ctrl textarea { resize: vertical; line-height: 1.35; }
 `;
@@ -197,16 +208,20 @@ export async function startPixiApp({ mount }) {
       row.innerHTML = `<label title="${tip}">${def.label}</label><select title="${tip}">${opts}</select>`;
       row.querySelector("select").onchange = (ev) => { obj[def.key] = ev.target.value; onChange?.(); };
     } else if (type === "text") {
+      // Path fields get a full-width layout (label on its own line) so long paths aren't clipped,
+      // a 📁 browse button that lists served assets, a source badge, and a ✕ clear-to-default.
+      row.className = cls + " pathrow";
       const esc = String(val ?? "").replace(/"/g, "&quot;");
-      // Source badge: shows the fallback (generated/soft dot/sliders) when blank, or the active
-      // source (PNG/file) highlighted when a path is set. The ✕ clears back to that default.
       const srcLabel = (set) => set ? (def.setLabel || "file") : (def.emptyLabel || "default");
-      row.innerHTML = `<label title="${tip}">${def.label}</label><input type="text" value="${esc}" placeholder="${def.placeholder || ""}" title="${tip}"><span class="src" title="current source"></span><span class="clr" title="clear — use the generated default">✕</span>`;
+      const browse = def.pick ? `<span class="browse" title="browse served assets">📁</span>` : "";
+      row.innerHTML = `<label title="${tip}">${def.label}</label><input type="text" value="${esc}" placeholder="${def.placeholder || ""}" title="${tip}">${browse}<span class="src" title="current source"></span><span class="clr" title="clear — use the generated default">✕</span>`;
       const input = row.querySelector("input"), badge = row.querySelector(".src"), clr = row.querySelector(".clr");
       const sync = () => { const set = !!input.value.trim(); badge.textContent = srcLabel(set); badge.classList.toggle("on", set); clr.style.display = set ? "" : "none"; };
+      const setPath = (p) => { input.value = p; obj[def.key] = p; sync(); onChange?.(); };
       input.oninput = sync;
-      input.onchange = (ev) => { obj[def.key] = ev.target.value.trim(); onChange?.(); };
-      clr.onclick = () => { input.value = ""; obj[def.key] = ""; sync(); onChange?.(); };
+      input.onchange = () => { obj[def.key] = input.value.trim(); onChange?.(); };
+      clr.onclick = () => { setPath(""); };
+      if (def.pick) row.querySelector(".browse").onclick = () => toggleAssetMenu(row, def, setPath);
       sync();
     } else if (type === "textarea") {
       row.className = cls + " ta";
@@ -221,6 +236,43 @@ export async function startPixiApp({ mount }) {
       input.oninput = () => { obj[def.key] = parseFloat(input.value); out.textContent = (+input.value).toFixed(def.step < 1 ? 2 : 0); onChange?.(); };
     }
     return row;
+  }
+
+  // Browse served assets: list files under def.pick.dir (matching def.pick.exts, one subfolder
+  // deep) via the dev server's directory listing, and show an inline menu to pick one. Keeps the
+  // path-reference model (stores e.g. "/assets/spark.png"). Falls back to a native file picker
+  // (assuming the file lives in the pick dir) if the listing can't be read.
+  async function listAssets(dir, exts) {
+    const base = dir.replace(/\/$/, ""), out = [];
+    const scan = async (d, depth) => {
+      let html; try { html = await (await fetch(d + "/")).text(); } catch { return; }
+      const doc = new DOMParser().parseFromString(html, "text/html");
+      for (const a of doc.querySelectorAll("a")) {
+        const h = a.getAttribute("href"); if (!h || h === "../" || h.startsWith("/") || h.startsWith("?")) continue;
+        if (h.endsWith("/")) { if (depth > 0) await scan(d + "/" + h.replace(/\/$/, ""), depth - 1); }
+        else if (exts.some((e) => h.toLowerCase().endsWith("." + e))) out.push(d + "/" + decodeURIComponent(h));
+      }
+    };
+    await scan(base, 1);
+    return out;
+  }
+  async function toggleAssetMenu(row, def, setPath) {
+    const open = row.nextElementSibling;
+    ctrlPanel.querySelectorAll(".assetmenu").forEach((m) => m.remove());
+    if (open && open.classList.contains("assetmenu")) return; // was open -> toggle closed
+    const menu = document.createElement("div"); menu.className = "assetmenu"; menu.textContent = "loading…";
+    row.after(menu);
+    const files = await listAssets(def.pick.dir, def.pick.exts);
+    menu.textContent = "";
+    if (!files.length) { // listing unavailable — native picker, assume the pick dir
+      menu.remove();
+      const inp = document.createElement("input"); inp.type = "file"; inp.accept = def.pick.exts.map((e) => "." + e).join(",");
+      inp.onchange = () => { const f = inp.files?.[0]; if (f) setPath(def.pick.dir.replace(/\/$/, "") + "/" + f.name); };
+      inp.click(); return;
+    }
+    const item = (label, cls, fn) => { const d = document.createElement("div"); d.className = "ai " + cls; d.textContent = label; d.onclick = () => { fn(); menu.remove(); }; menu.appendChild(d); };
+    item("— generated default —", "gen", () => setPath(""));
+    for (const f of files) item(f, "", () => setPath(f));
   }
 
   // Particle Systems editor — add/rename/delete systems, set a texture path per system, tune
@@ -255,13 +307,13 @@ export async function startPixiApp({ mount }) {
       const del = hdr.querySelector(".del");
       if (del) del.onclick = () => { delete systems[name]; current.applyParticles?.(); buildControls(); };
       ctrlPanel.appendChild(hdr);
-      ctrlPanel.appendChild(makeControlRow({ key: "texture", label: "PNG", type: "text", placeholder: "/assets/spark.png", emptyLabel: "soft dot", setLabel: "PNG", tip: "Texture path or URL served by the frontend — blank uses the soft dot" }, sys, "r fp", onEdit));
+      ctrlPanel.appendChild(makeControlRow({ key: "texture", label: "PNG", type: "text", placeholder: "/assets/spark.png", emptyLabel: "soft dot", setLabel: "PNG", pick: { dir: "/assets", exts: ["png", "jpg", "jpeg", "webp", "svg", "gif"] }, tip: "Texture path or URL served by the frontend — blank uses the soft dot" }, sys, "r fp", onEdit));
       ctrlPanel.appendChild(makeControlRow({ key: "shape", label: "Shape", type: "select", options: ["scatter", "ring"], tip: "scatter = spray in random directions · ring = particles fly radially outward from the spawn point (an expanding ring ripple)" }, sys, "r fp", onEdit));
       for (const p of SYSTEM_PARAMS) {
         if (p.only && p.only !== sys.type) continue;
         ctrlPanel.appendChild(makeControlRow(p, sys, "r fp", onEdit));
       }
-      ctrlPanel.appendChild(makeControlRow({ key: "config", label: "Emitter JSON", type: "text", placeholder: "/assets/emitters/example.json", emptyLabel: "sliders", setLabel: "file", tip: "Path/URL to a Pixi particle-editor JSON file (edit it in the editor, save back down). When set it overrides the sliders above; the PNG + color still apply." }, sys, "r fp", onEdit));
+      ctrlPanel.appendChild(makeControlRow({ key: "config", label: "Emitter JSON", type: "text", placeholder: "/assets/emitters/example.json", emptyLabel: "sliders", setLabel: "file", pick: { dir: "/assets", exts: ["json"] }, tip: "Path/URL to a Pixi particle-editor JSON file (edit it in the editor, save back down). When set it overrides the sliders above; the PNG + color still apply." }, sys, "r fp", onEdit));
     }
   }
 

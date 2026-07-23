@@ -323,4 +323,6 @@ so the placeholders resolve out of the box (all white/grayscale, so they tint pe
 | `assets/emitters/example.json` | a system's **Emitter JSON** | starter editor config |
 
 Paste any of these paths (e.g. `/assets/spark.png`) into a system's PNG field or the Core/Halo PNG
-to try them; leave blank to keep the generated default.
+to try them; or click the **📁** on any path field to pick from the files actually served under
+`/assets/` (no typing). The **✕** clears a field back to the generated default, and the badge
+(`generated`/`soft dot`/`sliders` → `PNG`/`file`) shows the current source at a glance.
