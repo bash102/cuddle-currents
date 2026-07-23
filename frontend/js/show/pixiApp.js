@@ -91,11 +91,16 @@ const CSS = `
 #preset-ctrl .fhdr .fname.ren:hover { text-decoration: underline dotted; }
 #preset-ctrl .fhdr .del:hover { color: #e0245e; }
 #preset-ctrl .fhdr .tsel { flex: 0 0 auto; width: auto; font-size: 10px; padding: 1px 4px; }
-#preset-ctrl .fhdr .edlink { flex: 0 0 auto; cursor: pointer; font-size: 9px; color: #7ad7c7;
+#preset-ctrl .edlink { flex: 0 0 auto; cursor: pointer; font-size: 9px; color: #7ad7c7;
   border: 1px solid rgba(122,215,199,0.4); border-radius: 8px; padding: 1px 6px; white-space: nowrap; }
-#preset-ctrl .fhdr .edlink:hover { background: rgba(122,215,199,0.12); }
-#preset-ctrl .fhdr .edlink.exp { color: #e0a96d; border-color: rgba(224,169,109,0.4); }
-#preset-ctrl .fhdr .edlink.exp:hover { background: rgba(224,169,109,0.12); }
+#preset-ctrl .edlink:hover { background: rgba(122,215,199,0.12); }
+#preset-ctrl .edlink.exp { color: #e0a96d; border-color: rgba(224,169,109,0.4); }
+#preset-ctrl .edlink.exp:hover { background: rgba(224,169,109,0.12); }
+#preset-ctrl .fhdr .caret { flex: 0 0 auto; cursor: pointer; color: #a89; font-size: 10px; width: 10px; user-select: none; }
+#preset-ctrl .fhdr .systag { flex: 0 0 auto; font-size: 8px; text-transform: uppercase; letter-spacing: .05em;
+  color: #e0a96d; border: 1px solid rgba(224,169,109,0.4); border-radius: 8px; padding: 1px 5px; }
+#preset-ctrl .sysact { display: flex; align-items: center; gap: 6px; margin: 2px 0 4px; padding-left: 12px; flex-wrap: wrap; }
+#preset-ctrl .sysact .tsel { flex: 0 0 auto; width: auto; font-size: 10px; padding: 1px 4px; }
 #preset-ctrl input[type=text], #preset-ctrl textarea { flex: 1; min-width: 0; background: #241019;
   color: #f2e4de; border: 1px solid rgba(255,255,255,0.14); border-radius: 5px; padding: 2px 4px;
   font: 10px ui-monospace, Menlo, monospace; }
@@ -173,6 +178,7 @@ export async function startPixiApp({ mount }) {
   }
 
   // ---- controls panel ----
+  const collapsedSys = new Set(); // particle systems collapsed in the panel (UI-only)
   function buildControls() {
     ctrlPanel.innerHTML = "";
     const controls = current?.controls, params = current?.params;
@@ -308,22 +314,31 @@ export async function startPixiApp({ mount }) {
     const onEdit = () => current.applyParticles?.();
     for (const name of Object.keys(systems)) {
       const sys = systems[name];
+      const collapsed = collapsedSys.has(name);
+      const locked = !!BUILTIN_SYS[name]; // only the renderer's built-ins can't be deleted
+      const tag = sys.fromFolder ? `<span class="systag" title="auto-loaded from /assets/emitters — reappears on reload while the file exists">file</span>` : "";
       const hdr = document.createElement("div"); hdr.className = "fhdr";
-      hdr.innerHTML = `<span class="fname ren" title="rename">${sys.label || name}</span>
-        <span class="edlink exp" title="export this system as a standalone JSON asset (save it under /assets/emitters/, then point Emitter JSON at it)">⬇ export</span>
-        <span class="edlink" title="open the Pixi particle-emitter editor in a new tab (then save its export to this system's Emitter JSON)">edit ↗</span>
-        <select class="tsel" title="emission type">
-          <option value="continuous" ${sys.type === "continuous" ? "selected" : ""}>continuous</option>
-          <option value="hit" ${sys.type === "hit" ? "selected" : ""}>hit</option>
-        </select>
-        ${BUILTIN_SYS[name] ? "" : `<span class="mv del" title="delete system">✕</span>`}`;
+      hdr.innerHTML = `<span class="caret" title="collapse / expand">${collapsed ? "▸" : "▾"}</span>
+        <span class="fname ren" title="rename">${sys.label || name}</span>${tag}
+        ${locked ? "" : `<span class="mv del" title="delete system">✕</span>`}`;
+      hdr.querySelector(".caret").onclick = () => { collapsed ? collapsedSys.delete(name) : collapsedSys.add(name); buildControls(); };
       hdr.querySelector(".ren").onclick = () => { const nn = (prompt("Rename system:", sys.label || name) || "").trim(); if (nn) { sys.label = nn; buildControls(); } };
-      hdr.querySelector(".exp").onclick = () => exportSystem(name, sys);
-      hdr.querySelector(".edlink:not(.exp)").onclick = () => window.open("https://userland.pixijs.io/particle-emitter-editor/", "_blank", "noopener");
-      hdr.querySelector(".tsel").onchange = (ev) => { sys.type = ev.target.value; current.applyParticles?.(); buildControls(); };
       const del = hdr.querySelector(".del");
       if (del) del.onclick = () => { delete systems[name]; current.applyParticles?.(); buildControls(); };
       ctrlPanel.appendChild(hdr);
+      if (collapsed) continue;
+      // actions row: emission type + export + open-editor
+      const act = document.createElement("div"); act.className = "sysact";
+      act.innerHTML = `<select class="tsel" title="emission type">
+          <option value="continuous" ${sys.type === "continuous" ? "selected" : ""}>continuous</option>
+          <option value="hit" ${sys.type === "hit" ? "selected" : ""}>hit</option>
+        </select>
+        <span class="edlink exp" title="export this system as a standalone JSON asset (save it under /assets/emitters/, then point Emitter JSON at it)">⬇ export</span>
+        <span class="edlink" title="open the Pixi particle-emitter editor in a new tab, then save its export to this system's Emitter JSON">edit ↗</span>`;
+      act.querySelector(".tsel").onchange = (ev) => { sys.type = ev.target.value; current.applyParticles?.(); buildControls(); };
+      act.querySelector(".exp").onclick = () => exportSystem(name, sys);
+      act.querySelector(".edlink:not(.exp)").onclick = () => window.open("https://userland.pixijs.io/particle-emitter-editor/", "_blank", "noopener");
+      ctrlPanel.appendChild(act);
       ctrlPanel.appendChild(makeControlRow({ key: "texture", label: "PNG", type: "text", placeholder: "/assets/spark.png", emptyLabel: "soft dot", setLabel: "PNG", pick: { dir: "/assets", exts: ["png", "jpg", "jpeg", "webp", "svg", "gif"] }, tip: "Texture path or URL served by the frontend — blank uses the soft dot" }, sys, "r fp", onEdit));
       ctrlPanel.appendChild(makeControlRow({ key: "shape", label: "Shape", type: "select", options: ["scatter", "ring"], tip: "scatter = spray in random directions · ring = particles fly radially outward from the spawn point (an expanding ring ripple)" }, sys, "r fp", onEdit));
       for (const p of SYSTEM_PARAMS) {
@@ -338,7 +353,8 @@ export async function startPixiApp({ mount }) {
   function buildEventsEditor(events, systems) {
     const g = document.createElement("div"); g.className = "grp"; g.textContent = "Events";
     ctrlPanel.appendChild(g);
-    const refOptions = (r) => r.type === "particle" ? Object.keys(systems) : r.type === "filter" ? FILTER_ORDER : ["color", "graphic", "scale", "opacity"];
+    // particle refs show the system's label but store its key (so it matches the Particle Systems panel)
+    const refOptions = (r) => r.type === "particle" ? Object.keys(systems).map((k) => ({ v: k, t: systems[k].label || k })) : r.type === "filter" ? FILTER_ORDER : ["color", "graphic", "scale", "opacity"];
     events.forEach((ev) => {
       const hdr = document.createElement("div"); hdr.className = "fhdr";
       hdr.innerHTML = `<span class="fname">${ev.label}</span><span class="mv add" title="add reaction">＋</span>`;
@@ -348,7 +364,7 @@ export async function startPixiApp({ mount }) {
         const off = r.active === false;
         const box = document.createElement("div"); box.className = "rxn" + (off ? " off" : "");
         const sel = (label, key, options) =>
-          `<div class="rr"><span>${label}</span><select data-k="${key}">${options.map((o) => `<option value="${o}" ${o === r[key] ? "selected" : ""}>${o}</option>`).join("")}</select></div>`;
+          `<div class="rr"><span>${label}</span><select data-k="${key}">${options.map((o) => { const v = o.v ?? o, t = o.t ?? o; return `<option value="${v}" ${v === r[key] ? "selected" : ""}>${t}</option>`; }).join("")}</select></div>`;
         box.innerHTML = `<div class="rr"><span>on</span><input type="checkbox" class="actchk" ${off ? "" : "checked"} title="enable / disable this reaction"></div>` +
           sel("type", "type", REACTION_TYPES) + sel("ref", "ref", refOptions(r)) +
           sel("loc", "location", LOCATIONS) + sel("trig", "trigger", TRIGGERS) +
@@ -483,6 +499,25 @@ export async function startPixiApp({ mount }) {
     if (def.state && current.setState) current.setState(def.state);
     try { localStorage.setItem(LAST_KEY, def.id); } catch {}
     refreshOpenBtn(); buildControls();
+    mergeFolderSystems(); // pull in any /assets/emitters/*.json as file-backed systems
+  }
+
+  // Auto-surface emitter-folder files as particle systems: any /assets/emitters/*.json not already
+  // represented becomes a file-backed system (attachable to events, fired by the renderer). Keyed by
+  // filename, so a file that matches a built-in key (aura.json) is skipped. Async; rebuilds when done.
+  async function mergeFolderSystems() {
+    const systems = current?.params?.particleSystems; if (!systems) return;
+    let files; try { files = await listAssets("/assets/emitters", ["json"]); } catch { return; }
+    let added = false;
+    for (const path of files) {
+      const key = path.split("/").pop().replace(/\.[^.]+$/, "");
+      if (systems[key] || Object.values(systems).some((s) => s.config === path)) continue;
+      let type = "continuous";
+      try { const cfg = await (await fetch(path)).json(); if (!(cfg.emitterLifetime < 0)) type = "hit"; } catch {}
+      systems[key] = { ...newParticleSystem(key), type, color: "cohort", config: path, fromFolder: true };
+      added = true;
+    }
+    if (added) { current.applyParticles?.(); buildControls(); }
   }
 
   addEventListener("keydown", (e) => {
