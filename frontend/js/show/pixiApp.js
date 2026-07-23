@@ -10,7 +10,7 @@ import { Application } from "../../vendor/pixi.min.mjs";
 import { getFrame } from "../store.js";
 import { PRESETS, RENDERERS } from "../presets/registry.js";
 import { FILTERS, FILTER_ORDER } from "../presets/filters.js";
-import { SYSTEM_PARAMS, newParticleSystem } from "../presets/particles.js";
+import { SYSTEM_PARAMS, newParticleSystem, systemToConfig } from "../presets/particles.js";
 import { REACTION_TYPES, LOCATIONS, TRIGGERS, makeReaction } from "../presets/events.js";
 
 const CSS = `
@@ -94,6 +94,8 @@ const CSS = `
 #preset-ctrl .fhdr .edlink { flex: 0 0 auto; cursor: pointer; font-size: 9px; color: #7ad7c7;
   border: 1px solid rgba(122,215,199,0.4); border-radius: 8px; padding: 1px 6px; white-space: nowrap; }
 #preset-ctrl .fhdr .edlink:hover { background: rgba(122,215,199,0.12); }
+#preset-ctrl .fhdr .edlink.exp { color: #e0a96d; border-color: rgba(224,169,109,0.4); }
+#preset-ctrl .fhdr .edlink.exp:hover { background: rgba(224,169,109,0.12); }
 #preset-ctrl input[type=text], #preset-ctrl textarea { flex: 1; min-width: 0; background: #241019;
   color: #f2e4de; border: 1px solid rgba(255,255,255,0.14); border-radius: 5px; padding: 2px 4px;
   font: 10px ui-monospace, Menlo, monospace; }
@@ -282,7 +284,15 @@ export async function startPixiApp({ mount }) {
   // friendly params, and (advanced) paste editor JSON that overrides the sliders. Rebuild
   // emitters on any edit. `aura` and `joinBurst` are the renderer's built-ins (not deletable);
   // added systems fire once bound to an event.
-  const BUILTIN_SYS = { aura: 1, joinBurst: 1 };
+  // Download a particle system as a standalone emitter-JSON asset (save under /assets/emitters/,
+  // then point its Emitter JSON field at it to reuse it across presets).
+  function exportSystem(name, sys) {
+    const blob = new Blob([JSON.stringify(systemToConfig(sys), null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a"); a.href = url; a.download = (name || "system") + ".json"; a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+  const BUILTIN_SYS = { aura: 1, joinBurst: 1, ringBurst: 1 };
   function buildParticleEditor(systems) {
     const g = document.createElement("div"); g.className = "grp";
     g.innerHTML = `Particle Systems <span class="mv add" title="new system">＋</span>`;
@@ -300,6 +310,7 @@ export async function startPixiApp({ mount }) {
       const sys = systems[name];
       const hdr = document.createElement("div"); hdr.className = "fhdr";
       hdr.innerHTML = `<span class="fname ren" title="rename">${sys.label || name}</span>
+        <span class="edlink exp" title="export this system as a standalone JSON asset (save it under /assets/emitters/, then point Emitter JSON at it)">⬇ export</span>
         <span class="edlink" title="open the Pixi particle-emitter editor in a new tab (then save its export to this system's Emitter JSON)">edit ↗</span>
         <select class="tsel" title="emission type">
           <option value="continuous" ${sys.type === "continuous" ? "selected" : ""}>continuous</option>
@@ -307,7 +318,8 @@ export async function startPixiApp({ mount }) {
         </select>
         ${BUILTIN_SYS[name] ? "" : `<span class="mv del" title="delete system">✕</span>`}`;
       hdr.querySelector(".ren").onclick = () => { const nn = (prompt("Rename system:", sys.label || name) || "").trim(); if (nn) { sys.label = nn; buildControls(); } };
-      hdr.querySelector(".edlink").onclick = () => window.open("https://userland.pixijs.io/particle-emitter-editor/", "_blank", "noopener");
+      hdr.querySelector(".exp").onclick = () => exportSystem(name, sys);
+      hdr.querySelector(".edlink:not(.exp)").onclick = () => window.open("https://userland.pixijs.io/particle-emitter-editor/", "_blank", "noopener");
       hdr.querySelector(".tsel").onchange = (ev) => { sys.type = ev.target.value; current.applyParticles?.(); buildControls(); };
       const del = hdr.querySelector(".del");
       if (del) del.onclick = () => { delete systems[name]; current.applyParticles?.(); buildControls(); };

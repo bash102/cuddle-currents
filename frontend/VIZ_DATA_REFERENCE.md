@@ -253,11 +253,17 @@ Per system:
   from a thin torus = an expanding ring ripple).
 - **`texture`** — path/URL to a PNG served by the frontend (e.g. `/assets/spark.png`). Blank = the
   generated soft dot. Loads async with a soft-dot fallback; a bad path warns and falls back.
-- **`config`** — path/URL to a **Pixi particle-editor JSON file** (e.g. `/assets/emitters/spark.json`).
-  When set it **overrides the sliders** for that system (the PNG + node/cohort color are still
-  injected). This is the *hybrid* workflow: edit the file in the editor
-  (https://userland.pixijs.io/particle-emitter-editor/) and save it back down — no copy-paste. Old
-  editor exports are auto-upgraded; a starter file lives at `frontend/assets/emitters/example.json`.
+- **`config`** — path/URL to an **emitter JSON file** (e.g. `/assets/emitters/spark.json`). When set
+  it **overrides the sliders** for that system (the PNG + node/cohort color are still injected). Old
+  Pixi-editor exports are auto-upgraded.
+
+**Systems as standalone assets.** A system lives *in the preset* by default (slider-defined, saved
+with the preset) — but every system header has **⬇ export**, which downloads it as a standalone
+emitter JSON. Save that under `frontend/assets/emitters/` and point the system's **Emitter JSON**
+field at it (📁) to reuse it across presets — the export round-trips identically through the loader.
+The three built-ins ship as assets too (`assets/emitters/{aura,joinBurst,ringBurst}.json`). **edit ↗**
+opens the Pixi editor (https://userland.pixijs.io/particle-emitter-editor/) in a new tab; author or
+edit a file there, save it, and point Emitter JSON at it.
 
 ### Events → reactions (choreography)
 The renderer emits a fixed `EVENT_CATALOG` — **activated, joined, left, disconnected, beat, removed**.
@@ -270,7 +276,8 @@ A preset binds **reactions** to each (in `CFG.events`, edited in the Events pane
 - **trigger** — `hit` (once, at the moment) or `continuous`/`modulate` (every frame the state holds).
 
 Each reaction has an **on/off toggle** and exposes the referenced item's **settings inline**: a
-particle reaction shows the shared system's params (Shape, Rate/Burst, Life…); a filter reaction
+particle reaction shows the **shared** system's params (Shape, Rate/Burst, Life…) — the *same*
+object the Particle Systems panel edits, not a copy, so a change there changes it everywhere; a filter reaction
 shows that instance's params (amplitude, wavelength… + Duration) — the center comes from `location`;
 a property reaction shows Amount + Duration.
 

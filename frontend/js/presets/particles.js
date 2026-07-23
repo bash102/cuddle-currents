@@ -125,6 +125,14 @@ function buildFromSys(sys, tex, colorHex) {
   };
 }
 
+// A system's friendly params -> a standalone emitter-config object (JSON-serializable). Texture
+// is left null (a separate field, injected on load) and color neutral so it re-tints per node.
+// This is exactly what buildConfig() reads back from an Emitter JSON file, so Export -> point the
+// Emitter JSON field at the file round-trips identically.
+export function systemToConfig(sys) {
+  return buildFromSys(sys, null, "ffffff");
+}
+
 export class ParticleSystem {
   constructor() {
     this.container = new Container();
