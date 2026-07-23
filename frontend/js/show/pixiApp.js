@@ -98,6 +98,8 @@ const CSS = `
   color: #9a8590; padding: 2px 5px; border: 1px solid rgba(255,255,255,0.14); border-radius: 8px;
   white-space: nowrap; }
 #preset-ctrl .r .src.on { color: #7ad7c7; border-color: rgba(122,215,199,0.5); background: rgba(122,215,199,0.08); }
+#preset-ctrl .r .clr { flex: 0 0 auto; cursor: pointer; color: #8a7580; font-size: 11px; padding: 0 3px; user-select: none; }
+#preset-ctrl .r .clr:hover { color: #e0245e; }
 #preset-ctrl .r.ta { align-items: flex-start; }
 #preset-ctrl textarea { resize: vertical; line-height: 1.35; }
 `;
@@ -196,14 +198,16 @@ export async function startPixiApp({ mount }) {
       row.querySelector("select").onchange = (ev) => { obj[def.key] = ev.target.value; onChange?.(); };
     } else if (type === "text") {
       const esc = String(val ?? "").replace(/"/g, "&quot;");
-      // Source badge: shows the fallback (generated/soft dot/sliders) when blank, or the
-      // active source (PNG/file) highlighted when a path is set — so it's never ambiguous.
+      // Source badge: shows the fallback (generated/soft dot/sliders) when blank, or the active
+      // source (PNG/file) highlighted when a path is set. The ✕ clears back to that default.
       const srcLabel = (set) => set ? (def.setLabel || "file") : (def.emptyLabel || "default");
-      const isSet = !!String(val ?? "").trim();
-      row.innerHTML = `<label title="${tip}">${def.label}</label><input type="text" value="${esc}" placeholder="${def.placeholder || ""}" title="${tip}"><span class="src ${isSet ? "on" : ""}" title="current source">${srcLabel(isSet)}</span>`;
-      const input = row.querySelector("input"), badge = row.querySelector(".src");
-      input.oninput = () => { const set = !!input.value.trim(); badge.textContent = srcLabel(set); badge.classList.toggle("on", set); };
+      row.innerHTML = `<label title="${tip}">${def.label}</label><input type="text" value="${esc}" placeholder="${def.placeholder || ""}" title="${tip}"><span class="src" title="current source"></span><span class="clr" title="clear — use the generated default">✕</span>`;
+      const input = row.querySelector("input"), badge = row.querySelector(".src"), clr = row.querySelector(".clr");
+      const sync = () => { const set = !!input.value.trim(); badge.textContent = srcLabel(set); badge.classList.toggle("on", set); clr.style.display = set ? "" : "none"; };
+      input.oninput = sync;
       input.onchange = (ev) => { obj[def.key] = ev.target.value.trim(); onChange?.(); };
+      clr.onclick = () => { input.value = ""; obj[def.key] = ""; sync(); onChange?.(); };
+      sync();
     } else if (type === "textarea") {
       row.className = cls + " ta";
       const esc = String(val ?? "").replace(/</g, "&lt;");
