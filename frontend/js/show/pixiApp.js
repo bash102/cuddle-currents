@@ -94,6 +94,10 @@ const CSS = `
 #preset-ctrl input[type=text], #preset-ctrl textarea { flex: 1; min-width: 0; background: #241019;
   color: #f2e4de; border: 1px solid rgba(255,255,255,0.14); border-radius: 5px; padding: 2px 4px;
   font: 10px ui-monospace, Menlo, monospace; }
+#preset-ctrl .r .src { flex: 0 0 auto; font-size: 8px; text-transform: uppercase; letter-spacing: .05em;
+  color: #9a8590; padding: 2px 5px; border: 1px solid rgba(255,255,255,0.14); border-radius: 8px;
+  white-space: nowrap; }
+#preset-ctrl .r .src.on { color: #7ad7c7; border-color: rgba(122,215,199,0.5); background: rgba(122,215,199,0.08); }
 #preset-ctrl .r.ta { align-items: flex-start; }
 #preset-ctrl textarea { resize: vertical; line-height: 1.35; }
 `;
@@ -192,8 +196,14 @@ export async function startPixiApp({ mount }) {
       row.querySelector("select").onchange = (ev) => { obj[def.key] = ev.target.value; onChange?.(); };
     } else if (type === "text") {
       const esc = String(val ?? "").replace(/"/g, "&quot;");
-      row.innerHTML = `<label title="${tip}">${def.label}</label><input type="text" value="${esc}" placeholder="${def.placeholder || ""}" title="${tip}">`;
-      row.querySelector("input").onchange = (ev) => { obj[def.key] = ev.target.value.trim(); onChange?.(); };
+      // Source badge: shows the fallback (generated/soft dot/sliders) when blank, or the
+      // active source (PNG/file) highlighted when a path is set — so it's never ambiguous.
+      const srcLabel = (set) => set ? (def.setLabel || "file") : (def.emptyLabel || "default");
+      const isSet = !!String(val ?? "").trim();
+      row.innerHTML = `<label title="${tip}">${def.label}</label><input type="text" value="${esc}" placeholder="${def.placeholder || ""}" title="${tip}"><span class="src ${isSet ? "on" : ""}" title="current source">${srcLabel(isSet)}</span>`;
+      const input = row.querySelector("input"), badge = row.querySelector(".src");
+      input.oninput = () => { const set = !!input.value.trim(); badge.textContent = srcLabel(set); badge.classList.toggle("on", set); };
+      input.onchange = (ev) => { obj[def.key] = ev.target.value.trim(); onChange?.(); };
     } else if (type === "textarea") {
       row.className = cls + " ta";
       const esc = String(val ?? "").replace(/</g, "&lt;");
@@ -241,13 +251,13 @@ export async function startPixiApp({ mount }) {
       const del = hdr.querySelector(".del");
       if (del) del.onclick = () => { delete systems[name]; current.applyParticles?.(); buildControls(); };
       ctrlPanel.appendChild(hdr);
-      ctrlPanel.appendChild(makeControlRow({ key: "texture", label: "PNG", type: "text", placeholder: "/assets/spark.png", tip: "Texture path or URL served by the frontend — blank uses the soft dot" }, sys, "r fp", onEdit));
+      ctrlPanel.appendChild(makeControlRow({ key: "texture", label: "PNG", type: "text", placeholder: "/assets/spark.png", emptyLabel: "soft dot", setLabel: "PNG", tip: "Texture path or URL served by the frontend — blank uses the soft dot" }, sys, "r fp", onEdit));
       ctrlPanel.appendChild(makeControlRow({ key: "shape", label: "Shape", type: "select", options: ["scatter", "ring"], tip: "scatter = spray in random directions · ring = particles fly radially outward from the spawn point (an expanding ring ripple)" }, sys, "r fp", onEdit));
       for (const p of SYSTEM_PARAMS) {
         if (p.only && p.only !== sys.type) continue;
         ctrlPanel.appendChild(makeControlRow(p, sys, "r fp", onEdit));
       }
-      ctrlPanel.appendChild(makeControlRow({ key: "config", label: "Emitter JSON", type: "text", placeholder: "/assets/emitters/example.json", tip: "Path/URL to a Pixi particle-editor JSON file (edit it in the editor, save back down). When set it overrides the sliders above; the PNG + color still apply." }, sys, "r fp", onEdit));
+      ctrlPanel.appendChild(makeControlRow({ key: "config", label: "Emitter JSON", type: "text", placeholder: "/assets/emitters/example.json", emptyLabel: "sliders", setLabel: "file", tip: "Path/URL to a Pixi particle-editor JSON file (edit it in the editor, save back down). When set it overrides the sliders above; the PNG + color still apply." }, sys, "r fp", onEdit));
     }
   }
 
