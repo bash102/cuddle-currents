@@ -35,7 +35,10 @@ export function defaultEvents() {
     label: e.label,
     reactions:
       e.id === "activated" ? [{ active: true, type: "particle", ref: "aura", location: "node", trigger: "continuous" }]
-      : e.id === "hr" ? [{ active: true, type: "property", ref: "scale", location: "node", trigger: "continuous", curve: "cosine", params: { amount: 0.28, rate: 1 } }]
+      : e.id === "hr" ? [
+          { active: true, type: "property", ref: "scale", location: "node", trigger: "continuous", curve: "cosine", params: { amount: 0.28, rate: 1 } },
+          { active: true, type: "property", ref: "halo", location: "node", trigger: "continuous", curve: "cosine", params: { amount: 0.5, rate: 1 } },
+        ]
       : e.id === "joined" ? [
           { active: true, type: "particle", ref: "joinBurst", location: "node", trigger: "hit" },   // celebratory spray
           { active: true, type: "particle", ref: "ringBurst", location: "node", trigger: "hit" },    // per-node ripple (scales)

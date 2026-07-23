@@ -118,7 +118,7 @@ const CFG = {
   // coreTexture/haloTexture = optional PNG path/URL (blank = generated disc). See particles for
   // the same path convention.
   coreTexture: "", haloTexture: "", haloScale: 1.9, haloAlpha: 0.16, haloOn: true,
-  beatPulse: 0, haloPulse: 12,  // intrinsic px heartbeat pulse: core (0 — the HR event drives it) / halo
+  beatPulse: 0, haloPulse: 0,  // intrinsic px heartbeat pulse (both 0 — the HR event drives core + halo)
   // particle systems (named, friendly-param; see particles.js) — referenced by events
   particleSystems: defaultParticleSystems(),
   // events / choreography (see events.js) — reactions bound to renderer events
@@ -658,8 +658,9 @@ export function createNodeGraph(app) {
       n.core.tint = tint; n.halo.tint = tint;
       n.core.width = n.core.height = 2 * r;                        // sprite sized to the core diameter
       n.halo.visible = CFG.haloOn;
-      // halo uses the pre-reaction scale + its own haloPulse, so it's independent of the HR scale reaction
-      if (CFG.haloOn) { const hr = CFG.baseR * baseCohortScale * CFG.haloScale + CFG.haloPulse * beat; n.halo.width = n.halo.height = 2 * hr; n.halo.alpha = CFG.haloAlpha; }
+      // halo uses the pre-reaction (core) scale so it's independent of the core; its own pulse comes
+      // from the "halo" property reaction (efx.haloScale) plus the intrinsic haloPulse px.
+      if (CFG.haloOn) { const hr = CFG.baseR * baseCohortScale * CFG.haloScale * (1 + efx.haloScale) + CFG.haloPulse * beat; n.halo.width = n.halo.height = 2 * hr; n.halo.alpha = CFG.haloAlpha; }
       n.label.x = n.x; n.label.y = n.y + CFG.baseR * cohortScale + 7; n.label.alpha = nodeAlpha;
       // White while solo (over black); dark once in a cohort but wrapped in a cohort-color
       // outer glow so the dark text stays legible over the bright center AND the black edges.

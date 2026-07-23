@@ -354,7 +354,7 @@ export async function startPixiApp({ mount }) {
     const g = document.createElement("div"); g.className = "grp"; g.textContent = "Events";
     ctrlPanel.appendChild(g);
     // particle refs show the system's label but store its key (so it matches the Particle Systems panel)
-    const refOptions = (r) => r.type === "particle" ? Object.keys(systems).map((k) => ({ v: k, t: systems[k].label || k })) : r.type === "filter" ? FILTER_ORDER : ["color", "graphic", "scale", "opacity"];
+    const refOptions = (r) => r.type === "particle" ? Object.keys(systems).map((k) => ({ v: k, t: systems[k].label || k })) : r.type === "filter" ? FILTER_ORDER : ["scale", "halo", "opacity", "color", "graphic"];
     events.forEach((ev) => {
       const hdr = document.createElement("div"); hdr.className = "fhdr";
       hdr.innerHTML = `<span class="fname">${ev.label}</span><span class="mv add" title="add reaction">＋</span>`;
@@ -403,7 +403,7 @@ export async function startPixiApp({ mount }) {
       if (r.params.amount === undefined) r.params.amount = r.ref === "opacity" ? 0.6 : 0.5;
       const continuous = r.trigger !== "hit";
       const wrap = note(); wrap.textContent = "property settings:"; box.appendChild(wrap);
-      if (continuous && (r.ref === "scale" || r.ref === "opacity")) {
+      if (continuous && (r.ref === "scale" || r.ref === "opacity" || r.ref === "halo")) {
         // programmatic waveform driven by the node's HR phase
         if (r.params.rate === undefined) r.params.rate = 1;
         box.appendChild(makeControlRow({ key: "curve", label: "Curve", type: "select", options: CURVES, tip: "How the value follows the heartbeat: cosine (smooth breathe) · bounce (sharp thump) · triangle · pulse (blip) · static." }, r, "r fp"));

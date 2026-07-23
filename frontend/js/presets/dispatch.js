@@ -30,16 +30,19 @@ function applyProp(node, prop, ctx, isHit, params, curve) {
   if (isHit) {
     const p = (node.pulse = node.pulse || {});
     if (prop === "scale") p.scale = { amt: amt ?? 0.5, t: 0, dur: dur ?? 0.4 };        // pop, decays out
+    else if (prop === "halo") p.halo = { amt: amt ?? 0.5, t: 0, dur: dur ?? 0.4 };     // halo pop
     else if (prop === "opacity") p.opacity = { amt: -(amt ?? 0.6), t: 0, dur: dur ?? 0.4 }; // dip
     else if (prop === "color") p.color = { to: 0xffffff, t: 0, dur: dur ?? 0.4 };          // white flash
   } else {
     const h = (node.hold = node.hold || {});
-    if (curve && curve !== "static" && (prop === "scale" || prop === "opacity")) {
+    if (curve && curve !== "static" && (prop === "scale" || prop === "opacity" || prop === "halo")) {
       const c = propCurve(curve, node.phase * (params?.rate ?? 1)); // HR-driven waveform (rate = ×BPM)
-      if (prop === "scale") h.scale = (amt ?? 0.15) * c;       // grows on the beat
+      if (prop === "scale") h.scale = (amt ?? 0.15) * c;       // core grows on the beat
+      else if (prop === "halo") h.haloScale = (amt ?? 0.15) * c; // halo grows on the beat
       else h.opacity = -(amt ?? 0.15) * (1 - c);               // full alpha on beat, dims between
     } else {
       if (prop === "scale") h.scale = amt ?? 0.15;             // steady offset
+      else if (prop === "halo") h.haloScale = amt ?? 0.15;
       else if (prop === "opacity") h.opacity = -(amt ?? 0.15); // steady dim
       else if (prop === "color") h.color = ctx.cohortColor ?? node.colorNum;
     }
@@ -92,9 +95,9 @@ export class Choreographer {
 // { scale (multiplier delta), alpha (additive), colorTo/colorMix (flash toward a color) }.
 // Combines the steady `hold` (continuous reactions) with the fading `pulse` (hit reactions).
 export function nodeFx(node, dt) {
-  let scale = 0, alpha = 0, colorTo = null, colorMix = 0;
+  let scale = 0, alpha = 0, haloScale = 0, colorTo = null, colorMix = 0;
   const h = node.hold;
-  if (h) { if (h.scale) scale += h.scale; if (h.opacity) alpha += h.opacity; if (h.color != null) { colorTo = h.color; colorMix = Math.max(colorMix, 0.5); } }
+  if (h) { if (h.scale) scale += h.scale; if (h.opacity) alpha += h.opacity; if (h.haloScale) haloScale += h.haloScale; if (h.color != null) { colorTo = h.color; colorMix = Math.max(colorMix, 0.5); } }
   const p = node.pulse;
   if (p) {
     for (const key of Object.keys(p)) {
@@ -103,9 +106,10 @@ export function nodeFx(node, dt) {
       if (k >= 1) { delete p[key]; continue; }
       const env = Math.sin(Math.PI * k); // 0 → 1 → 0
       if (key === "scale") scale += e.amt * env;
+      else if (key === "halo") haloScale += e.amt * env;
       else if (key === "opacity") alpha += e.amt * env;
       else if (key === "color") { colorTo = e.to; colorMix = Math.max(colorMix, env); }
     }
   }
-  return { scale, alpha, colorTo, colorMix };
+  return { scale, alpha, haloScale, colorTo, colorMix };
 }
