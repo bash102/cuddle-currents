@@ -25,3 +25,6 @@ config/enrollment.yaml
 
 # Local MCP server config (personal tooling)
 .mcp.json
+
+# Photoshop sources (keep exports, not sources)
+*.psd
