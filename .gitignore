@@ -22,3 +22,6 @@ config/enrollment.yaml
 .DS_Store
 .vscode/
 .idea/
+
+# Local MCP server config (personal tooling)
+.mcp.json
