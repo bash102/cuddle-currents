@@ -124,6 +124,8 @@ const CFG = {
   events: defaultEvents(),
   // post-process filter stack (data-driven; see filters.js). Array order = stack order.
   filters: defaultFilters(),
+  // cohort ambient glow behind each cohort (generated additive circles, or a PNG when set)
+  cohortGlowTexture: "", cohortGlowSize: 1.0, cohortGlowAlpha: 1.0, cohortGlowFade: 2.0, cohortGlowOnset: 1.0,
   // colors (hex strings so they bind to color inputs)
   cohortHueSep: 45,      // min hue gap (°) between concurrent cohorts — 0 disables de-confliction
   bg: "#150a10",         // stage background
@@ -207,6 +209,17 @@ export const CONTROLS = [
   { group: "Nodes", key: "haloAlpha", label: "Halo alpha", min: 0, max: 1, step: 0.02,
     tip: "Opacity of the halo (multiplied by the node's own fade-in)." },
 
+  { group: "Colors", key: "cohortGlowTexture", label: "Cohort glow PNG", type: "text", placeholder: "/assets/glow.png",
+    emptyLabel: "generated", setLabel: "PNG", pick: { dir: "/assets", exts: ["png", "jpg", "jpeg", "webp", "svg", "gif"] },
+    tip: "PNG for the soft circle behind each cohort (blank = generated additive circles). Tinted to the cohort color, additive blend — use a white/grayscale radial glow." },
+  { group: "Colors", key: "cohortGlowSize", label: "Cohort glow size", min: 0.3, max: 3, step: 0.05,
+    tip: "Scale of the cohort glow relative to the cohort's extent." },
+  { group: "Colors", key: "cohortGlowAlpha", label: "Cohort glow α", min: 0, max: 3, step: 0.05,
+    tip: "Brightness of the cohort glow (× the fade-in strength)." },
+  { group: "Colors", key: "cohortGlowOnset", label: "Cohort glow onset", min: 0, max: 5, step: 0.1,
+    tip: "Seconds in cohort before the glow begins to appear." },
+  { group: "Colors", key: "cohortGlowFade", label: "Cohort glow fade", min: 0.1, max: 8, step: 0.1,
+    tip: "Seconds over which the cohort glow ramps from nothing to full (higher = gentler fade-in, no pop)." },
   { group: "Colors", key: "cohortHueSep", label: "Cohort hue sep", min: 0, max: 90, step: 5,
     tip: "Minimum hue gap (°) forced between concurrent cohorts so two groups never read as the same color. The most senior cohort keeps its true color; others rotate away. 0 = off." },
   { group: "Colors", key: "bg", label: "Background", type: "color",
@@ -264,15 +277,17 @@ export function createNodeGraph(app) {
   const fstack = new FilterStack(); // the data-driven post-process stack (CFG.filters)
   const eventFX = new EventFilters(); // positioned one-shot filters fired by events (shockwave…)
   let filterSig = "";                 // combined static+event filter signature (reassign on change)
-  const glowLayer = new Graphics();   // soft colored ambient under each cohort (the bloom amplifies it)
+  const glowLayer = new Graphics();   // generated soft ambient under each cohort (bloom amplifies it)
   glowLayer.blendMode = "add";
+  const glowSprites = new Container(); // PNG cohort glow when cohortGlowTexture is set
+  const glowPool = [];                 // reused glow sprites, one per cohort
   const edges = new Graphics();       // metaball connector necks (edgeStyle "metaball")
   const edgeSprites = new Container(); // stretched-PNG connectors (edgeStyle "png")
   const edgePool = [];                 // reused edge sprites, one per drawn link
   const field = new ParticleSystem();  // per-node emitters + cohort-join bursts
   field.setSystems(CFG.particleSystems);
   const nodesLayer = new Container();
-  bloomGroup.addChild(glowLayer, edges, edgeSprites, field.container, nodesLayer);
+  bloomGroup.addChild(glowLayer, glowSprites, edges, edgeSprites, field.container, nodesLayer);
   const labelsLayer = new Container();
   container.addChild(bloomGroup, labelsLayer);
 
@@ -284,7 +299,7 @@ export function createNodeGraph(app) {
   // disc fallback, like the particle textures). applyNodeGraphics() swaps every node's sprite
   // textures when the paths change or a PNG finishes loading.
   const disc = makeDisc(), beam = makeBeam();
-  let coreTex = disc, haloTex = disc, edgeTex = beam;
+  let coreTex = disc, haloTex = disc, edgeTex = beam, glowTex = null; // glowTex null => generated circles
   const texCache = {}; // path -> Texture (loaded) | null (pending) | false (failed)
   function loadTex(path, fallback) {
     if (!path) return fallback;
@@ -304,12 +319,20 @@ export function createNodeGraph(app) {
     coreTex = loadTex(CFG.coreTexture, disc);
     haloTex = loadTex(CFG.haloTexture, disc);
     edgeTex = loadTex(CFG.edgeTexture, beam);
+    glowTex = CFG.cohortGlowTexture ? loadTex(CFG.cohortGlowTexture, null) : null; // null -> generated circles
     for (const [, n] of nodes) { n.core.texture = coreTex; n.halo.texture = haloTex; }
     for (const s of edgePool) s.texture = edgeTex;
+    for (const s of glowPool) if (glowTex) s.texture = glowTex;
   }
   function edgeSprite(i) {
     if (!edgePool[i]) { const s = new Sprite(edgeTex); s.anchor.set(0, 0.5); edgeSprites.addChild(s); edgePool[i] = s; }
     return edgePool[i];
+  }
+  function glowSprite(i) {
+    let s = glowPool[i];
+    if (!s) { s = new Sprite(glowTex); s.anchor.set(0.5); s.blendMode = "add"; glowSprites.addChild(s); glowPool[i] = s; }
+    else s.texture = glowTex;
+    return s;
   }
 
   function makeNode(p, w, h) {
@@ -560,17 +583,29 @@ export function createNodeGraph(app) {
     for (const rm of removedList) choreo.hit("removed", rm.node, rm.ctx, EV);
     choreo.frameEnd(); // tear down continuous emitters that weren't refreshed this frame
 
-    // --- cohort bloom (additive soft glow behind each cohort) ---
+    // --- cohort ambient glow behind each cohort: generated additive circles, or a PNG sprite ---
     glowLayer.clear();
+    const glowPng = !!glowTex;
+    glowLayer.visible = !glowPng;
+    glowSprites.visible = glowPng;
+    let gi = 0;
     for (const [root, c] of cent) {
       const grp = members.get(root); const m = grp[0].master; if (!m) continue;
       const gx = c.sx / c.cnt, gy = c.sy / c.cnt;
       let R = 40;
       for (const n of grp) R = Math.max(R, Math.hypot(n.x - gx, n.y - gy));
-      const strength = clamp01((m.cohortTime - CFG.tGravity) / 2);
-      glowLayer.circle(gx, gy, R + 70).fill({ color: m.masterColor, alpha: 0.05 * strength });
-      glowLayer.circle(gx, gy, R + 30).fill({ color: m.masterColor, alpha: 0.06 * strength });
+      const strength = clamp01((m.cohortTime - CFG.cohortGlowOnset) / Math.max(0.05, CFG.cohortGlowFade));
+      if (glowPng) {
+        const s = glowSprite(gi++);
+        s.visible = true; s.tint = m.masterColor; s.x = gx; s.y = gy;
+        s.alpha = clamp01(0.12 * strength * CFG.cohortGlowAlpha);
+        s.width = s.height = (R + 70) * 2 * CFG.cohortGlowSize;
+      } else {
+        glowLayer.circle(gx, gy, R + 70).fill({ color: m.masterColor, alpha: 0.05 * strength });
+        glowLayer.circle(gx, gy, R + 30).fill({ color: m.masterColor, alpha: 0.06 * strength });
+      }
     }
+    for (; gi < glowPool.length; gi++) glowPool[gi].visible = false;
 
     // --- render nodes (compute radius + tint) + continuous particle aura ---
     for (const n of arr) {
