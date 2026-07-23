@@ -106,7 +106,9 @@ function buildFromSys(sys, tex, colorHex) {
   const behaviors = [
     { type: "alpha", config: { alpha: { list: hit ? [{ time: 0, value: 0.9 }, { time: 1, value: 0 }] : [{ time: 0, value: 0 }, { time: 0.25, value: 0.6 }, { time: 1, value: 0 }] } } },
     { type: "scale", config: { scale: { list: [{ time: 0, value: sys.scaleStart }, { time: 1, value: sys.scaleEnd }] }, minMult: ring ? 1 : 0.7 } },
-    { type: "moveSpeed", config: { speed: { list: [{ time: 0, value: sys.speedStart }, { time: 1, value: sys.speedEnd }] }, minMult: ring ? 1 : 0.6 } },
+    // Floor the speed: the emitter's SpeedBehavior normalizes velocity every frame (1/length),
+    // so a speed of exactly 0 divides by zero -> NaN positions -> crash. 0.05 px/s reads as still.
+    { type: "moveSpeed", config: { speed: { list: [{ time: 0, value: Math.max(0.05, sys.speedStart) }, { time: 1, value: Math.max(0.05, sys.speedEnd) }] }, minMult: ring ? 1 : 0.6 } },
   ];
   // Ring: no random rotation — the torus (affectRotation) points each particle outward so
   // moveSpeed drives it radially. Scatter: random heading.
