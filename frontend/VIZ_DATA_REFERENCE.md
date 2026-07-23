@@ -300,5 +300,21 @@ rewire, or before it passes `tMaster`.
 
 ### Assets
 Drop referenced files anywhere under `frontend/` (the dev server serves it): PNGs (e.g.
-`frontend/assets/*.png`) for particle textures, and emitter JSON (e.g. `frontend/assets/emitters/*.json`)
+`frontend/assets/*.png`) for particle/node textures, and emitter JSON (e.g. `frontend/assets/emitters/*.json`)
 for the advanced particle configs. Presets store only the **path**, so the file must exist at that path.
+
+Built-in systems (`aura`, `joinBurst`, `ringBurst`) and the node core/halo are **generated at
+runtime** — the PNG fields are blank by default. A **starter pack** ships under `frontend/assets/`
+so the placeholders resolve out of the box (all white/grayscale, so they tint per node):
+
+| File | For | Shape |
+|---|---|---|
+| `assets/soft-dot.png` | particle aura | soft radial dot |
+| `assets/spark.png` | celebratory bursts | 4-point star |
+| `assets/ring.png` | ring-burst / ripple | thin bright ring |
+| `assets/node.png` | node **Core PNG** | solid disc, soft edge |
+| `assets/glow.png` | node **Halo PNG** | wide soft glow |
+| `assets/emitters/example.json` | a system's **Emitter JSON** | starter editor config |
+
+Paste any of these paths (e.g. `/assets/spark.png`) into a system's PNG field or the Core/Halo PNG
+to try them; leave blank to keep the generated default.

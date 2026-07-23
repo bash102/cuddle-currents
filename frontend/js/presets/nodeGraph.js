@@ -170,11 +170,11 @@ export const CONTROLS = [
 
   { group: "Nodes", key: "baseR", label: "Node size", min: 4, max: 30, step: 1,
     tip: "Base radius of the node core (px). Beat pulse + cohort scale-up are added on top." },
-  { group: "Nodes", key: "coreTexture", label: "Core PNG", type: "text",
+  { group: "Nodes", key: "coreTexture", label: "Core PNG", type: "text", placeholder: "/assets/node.png",
     tip: "Path/URL to a PNG for the node core (blank = generated disc). Tinted to the node/cohort color — use white/grayscale art." },
   { group: "Nodes", key: "haloOn", label: "Halo", type: "toggle",
     tip: "Show the soft outer halo behind each node." },
-  { group: "Nodes", key: "haloTexture", label: "Halo PNG", type: "text",
+  { group: "Nodes", key: "haloTexture", label: "Halo PNG", type: "text", placeholder: "/assets/glow.png",
     tip: "Path/URL to a PNG for the halo (blank = generated soft disc). Tinted to the node/cohort color." },
   { group: "Nodes", key: "haloScale", label: "Halo size", min: 1, max: 4, step: 0.1,
     tip: "Halo diameter relative to the node core." },

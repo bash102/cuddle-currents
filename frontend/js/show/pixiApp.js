@@ -247,7 +247,7 @@ export async function startPixiApp({ mount }) {
         if (p.only && p.only !== sys.type) continue;
         ctrlPanel.appendChild(makeControlRow(p, sys, "r fp", onEdit));
       }
-      ctrlPanel.appendChild(makeControlRow({ key: "config", label: "Emitter JSON", type: "text", placeholder: "/assets/emitters/spark.json", tip: "Path/URL to a Pixi particle-editor JSON file (edit it in the editor, save back down). When set it overrides the sliders above; the PNG + color still apply." }, sys, "r fp", onEdit));
+      ctrlPanel.appendChild(makeControlRow({ key: "config", label: "Emitter JSON", type: "text", placeholder: "/assets/emitters/example.json", tip: "Path/URL to a Pixi particle-editor JSON file (edit it in the editor, save back down). When set it overrides the sliders above; the PNG + color still apply." }, sys, "r fp", onEdit));
     }
   }
 
