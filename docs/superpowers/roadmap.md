@@ -33,7 +33,7 @@ Run 2+ gateways with overlapping coverage. Verify in practice: band **handoff/ro
 across gateways (identity is the band, so `person_id` continuity should hold), and that
 opportunistic capacity self-balances.
 
-### 3. Level B — app-orchestrated assignment  *(done — app side + firmware code; on-hardware validation pending — [`specs/2026-07-20-level-b-orchestration-design.md`](specs/2026-07-20-level-b-orchestration-design.md))*
+### 3. Level B — app-orchestrated assignment  *(done — app + firmware; **core on-hardware-validated 2026-07-22**, 5 bands / 5 gateways — [`specs/2026-07-20-level-b-orchestration-design.md`](specs/2026-07-20-level-b-orchestration-design.md))*
 The PoC shipped level A (opportunistic + per-gateway cap). Level B gives the app a global view
 and full authority (stability-first placement, auto-revert on orchestrator death). Shipped:
 - **`hub/orchestration/`** (`world.py` world-model + coverage memory, `plan.py` pure
@@ -79,17 +79,17 @@ Everything above is **mock-validated**; the single-ESP32 hardware test only exer
 default to `esp32-01`), the broker, `cuddle --source mqtt --orchestrate`, the **Ops page open in
 a browser**, and a handful of bands.
 
-- [ ] Both gateways appear in the Ops roster with correct `capacity`/`mode`; boot opportunistic,
+- [x] Both gateways appear in the Ops roster with correct `capacity`/`mode`; boot opportunistic,
       flip to managed when the orchestrator starts.
-- [ ] Bands get placed via `cmd` (real `connect`), HR flows, and the roster shows each band on
+- [x] Bands get placed via `cmd` (real `connect`), HR flows, and the roster shows each band on
       the right gateway. Confirm the LED goes green→brighter as bands land (teal in managed).
-- [ ] **Real RSSI noise**: watch initial placement for flapping / odd strongest-gateway picks
+- [x] **Real RSSI noise**: watch initial placement for flapping / odd strongest-gateway picks
       (real RSSI swings ±10–20 dBm; the mock used fixed values).
-- [ ] Manual override in the browser: force-connect a `seen` band to a chosen gateway;
+- [x] Manual override: force-connect a `seen` band to a chosen gateway;
       force-release; pin/unpin. Confirm Release actually sticks (the pin bug fixed in final review).
 - [ ] Enrollment: assign a band → it's pinned → force-connected → baselines → active, without a
       rebalance ever interrupting it.
-- [ ] **Roaming/handoff**: carry a band out of one gateway's range → it drops → re-placed on
+- [x] **Roaming/handoff**: carry a band out of one gateway's range → it drops → re-placed on
       another gateway with `person_id` continuity (history/matrix position intact).
 - [ ] **Unserved-band rebalance** with a real coverage-overlap topology (mirror the mock's
       band-only-reachable-via-a-full-gateway case): confirm it's served via one clean eviction,
@@ -97,11 +97,31 @@ a browser**, and a handful of bands.
 - [ ] **60s coverage limitation**: let bands sit connected >1 min, then introduce an unserved
       band — observe whether it's rebalanced in or (expected) surfaced as unserved. Decide if the
       conservative behavior is acceptable or needs the aggressive-rebalance change.
-- [ ] **App-death auto-revert**: kill the app → both gateways revert to opportunistic within
+- [x] **App-death auto-revert**: kill the app → both gateways revert to opportunistic within
       ~15s (LED yellow/green per Level A) → bands stay served. Restart → they return to managed.
-- [ ] Load/robustness: with many `seen` advertisers, confirm `report` still publishes (buffer
+- [x] Load/robustness: with many `seen` advertisers, confirm `report` still publishes (buffer
       sizing) and no MQTT churn; check the LED never sticks on a stale state.
-- [ ] Record results here + in the design spec; promote confirmed items out of "pending".
+- [x] Record results here + in the design spec; promote confirmed items out of "pending".
+
+**Results (2026-07-22 hardware session — 5 real bands, 5 IDF gateways on 1.0.3, live orchestrator):**
+Core Level B works on hardware. Bands placed via real `connect` cmds, HR flowed, roster/LED correct;
+all bands converged to `connected`. **Real RSSI noise validated + self-correcting:** a band placed at
+−94 dBm (a momentarily-strong-looking pick) dropped and the orchestrator re-placed it at −77 on another
+gateway; some connect-retry churn during convergence but no runaway thrash. Roaming re-placement kept
+`person_id` continuity (person stayed `connected` across a gateway change). App-death auto-revert clean:
+graceful shutdown flips all gateways to opportunistic **immediately** (the 15s grace is the ungraceful/LWT
+backstop), bands stay served via Level A, restart returns them to managed.
+
+*Findings (manual override, worth follow-up — not blockers):*
+1. **force-connect won't preempt a band held by another gateway** (peer-dedup blocks the double-connect);
+   moving a held band needs release-then-connect. Consider having `force_connect` release the current
+   holder first.
+2. **Release doesn't "stick" in managed mode with free slots** — the orchestrator re-fills the band
+   (plan Step 3, unpinned fill). An operator clicking Release expects it to stay off; consider a
+   short "released" cooldown or a manual "hold-off" flag.
+
+*Still untested (lower-risk, deferred):* enroll → baseline → **active** without a rebalance interrupt (#5);
+unserved-band rebalance with a real coverage-overlap topology (#7); the 60s coverage-memory limitation (#8).
 
 ### 4. Broker security
 TLS, credentials, and ACLs. The PoC assumes a trusted local network; real deployments need
