@@ -78,6 +78,20 @@ function makeDisc(size = 128) {
   return Texture.from(c);
 }
 
+// Default edge beam = a horizontal white bar with soft top/bottom edges (tinted per cohort).
+// Stretched center-to-center; the node cores render on top and hide its ends.
+function makeBeam(w = 128, h = 48) {
+  const c = document.createElement("canvas");
+  c.width = w; c.height = h;
+  const g = c.getContext("2d"), R = h / 2;
+  for (let y = 0; y < h; y++) {
+    const t = Math.abs(y - R + 0.5) / R;      // 0 center .. 1 edge
+    g.fillStyle = `rgba(255,255,255,${Math.max(0, 1 - t * t)})`;
+    g.fillRect(0, y, w, 1);
+  }
+  return Texture.from(c);
+}
+
 const CFG = {
   // idle motion
   drift: 6, driftTurn: 1.6, center: 0.04,
@@ -95,6 +109,9 @@ const CFG = {
   gravRamp: 1.0, fadeRamp: 1.0, scaleRamp: 1.0, scaleMax: 1.2,
   // edges: thin -> thick the longer a bond holds
   edgeMinW: 0.8, edgeMaxW: 5.5, edgeGrow: 8.0,
+  // edge style: "metaball" (generated gooey neck, edge-to-edge) or "png" (a stretched sprite
+  // from node CENTER to node center — set edgeTexture, scale thickness with edgePngWidth).
+  edgeStyle: "metaball", edgeTexture: "", edgePngWidth: 14,
   // links (jostle)
   linkMin: 1.4, linkMax: 3.2, linkFade: 0.4, linkPull: 0.4,
   // node graphic: a solid disc (core) + a bigger, dimmer disc (halo), each tinted per node.
@@ -166,7 +183,14 @@ export const CONTROLS = [
   { group: "Edges", key: "linkFade", label: "Link fade", min: 0.1, max: 1.5, step: 0.05,
     tip: "Fade in/out time as links rewire (s)." },
   { group: "Edges", key: "edgeGrow", label: "Thicken", min: 1, max: 16, step: 0.5,
-    tip: "Seconds over which a cohort's necks fatten toward their max." },
+    tip: "Seconds over which a cohort's necks fatten toward their max (metaball style)." },
+  { group: "Edges", key: "edgeStyle", label: "Edge style", type: "select", options: ["metaball", "png"],
+    tip: "metaball = generated gooey neck edge-to-edge; png = a stretched image from node center to node center (set Edge PNG below)." },
+  { group: "Edges", key: "edgeTexture", label: "Edge PNG", type: "text", placeholder: "/assets/beam.png",
+    emptyLabel: "generated", setLabel: "PNG",
+    tip: "PNG stretched along each connection (png style). Blank = a generated soft beam. Tinted to the cohort color — use white/grayscale art." },
+  { group: "Edges", key: "edgePngWidth", label: "Edge width", min: 2, max: 60, step: 1,
+    tip: "Thickness of the PNG edge beam (px)." },
 
   { group: "Nodes", key: "baseR", label: "Node size", min: 4, max: 30, step: 1,
     tip: "Base radius of the node core (px). Beat pulse + cohort scale-up are added on top." },
@@ -242,11 +266,13 @@ export function createNodeGraph(app) {
   let filterSig = "";                 // combined static+event filter signature (reassign on change)
   const glowLayer = new Graphics();   // soft colored ambient under each cohort (the bloom amplifies it)
   glowLayer.blendMode = "add";
-  const edges = new Graphics();       // metaball connector necks
+  const edges = new Graphics();       // metaball connector necks (edgeStyle "metaball")
+  const edgeSprites = new Container(); // stretched-PNG connectors (edgeStyle "png")
+  const edgePool = [];                 // reused edge sprites, one per drawn link
   const field = new ParticleSystem();  // per-node emitters + cohort-join bursts
   field.setSystems(CFG.particleSystems);
   const nodesLayer = new Container();
-  bloomGroup.addChild(glowLayer, edges, field.container, nodesLayer);
+  bloomGroup.addChild(glowLayer, edges, edgeSprites, field.container, nodesLayer);
   const labelsLayer = new Container();
   container.addChild(bloomGroup, labelsLayer);
 
@@ -257,26 +283,33 @@ export function createNodeGraph(app) {
   // Node core/halo textures: the generated disc by default, or a preset PNG (loaded async with a
   // disc fallback, like the particle textures). applyNodeGraphics() swaps every node's sprite
   // textures when the paths change or a PNG finishes loading.
-  const disc = makeDisc();
-  let coreTex = disc, haloTex = disc;
-  const nodeTexCache = {};
-  function loadNodeTex(path) {
-    if (!path) return disc;
-    const cached = nodeTexCache[path];
-    if (cached) return cached;
-    if (cached === undefined) {
-      nodeTexCache[path] = null;
+  const disc = makeDisc(), beam = makeBeam();
+  let coreTex = disc, haloTex = disc, edgeTex = beam;
+  const texCache = {}; // path -> Texture (loaded) | null (pending) | false (failed)
+  function loadTex(path, fallback) {
+    if (!path) return fallback;
+    const c = texCache[path];
+    if (c) return c;
+    if (c === undefined) {
+      texCache[path] = null;
       const img = new Image(); img.crossOrigin = "anonymous";
-      img.onload = () => { try { nodeTexCache[path] = Texture.from(img); applyNodeGraphics(); } catch { nodeTexCache[path] = disc; } };
-      img.onerror = () => { console.warn(`node texture failed to load: ${path}`); nodeTexCache[path] = disc; };
+      img.onload = () => { try { texCache[path] = Texture.from(img); applyTextures(); } catch { texCache[path] = false; } };
+      img.onerror = () => { console.warn(`texture failed to load: ${path}`); texCache[path] = false; };
       img.src = path;
     }
-    return disc;
+    return fallback; // pending / failed -> the generated fallback
   }
-  function applyNodeGraphics() {
-    coreTex = loadNodeTex(CFG.coreTexture);
-    haloTex = loadNodeTex(CFG.haloTexture);
+  // Reload node core/halo + edge textures and push them onto the live display objects.
+  function applyTextures() {
+    coreTex = loadTex(CFG.coreTexture, disc);
+    haloTex = loadTex(CFG.haloTexture, disc);
+    edgeTex = loadTex(CFG.edgeTexture, beam);
     for (const [, n] of nodes) { n.core.texture = coreTex; n.halo.texture = haloTex; }
+    for (const s of edgePool) s.texture = edgeTex;
+  }
+  function edgeSprite(i) {
+    if (!edgePool[i]) { const s = new Sprite(edgeTex); s.anchor.set(0, 0.5); edgeSprites.addChild(s); edgePool[i] = s; }
+    return edgePool[i];
   }
 
   function makeNode(p, w, h) {
@@ -589,8 +622,11 @@ export function createNodeGraph(app) {
       }
     }
 
-    // --- edges: gooey metaball necks to rotating partners, master color, thin -> fat ---
+    // --- edges: connect each node to its rotating partner (metaball neck OR stretched PNG) ---
     edges.clear();
+    const usePng = CFG.edgeStyle === "png";
+    edgeSprites.visible = usePng;
+    let ei = 0;
     for (const n of arr) {
       if (n.cohortTime < CFG.tMaster || !n.linkTo || n.masterColor == null) continue;
       const t = nodes.get(n.linkTo); if (!t) continue;
@@ -598,14 +634,26 @@ export function createNodeGraph(app) {
       const outF = clamp01((n.linkDur - n.linkAge) / CFG.linkFade);
       const alpha = 0.85 * clamp01((n.cohortTime - CFG.tMaster) / 0.5) * Math.min(inF, outF) * Math.min(n.alpha, t.alpha);
       if (alpha < 0.02) continue;
-      // Neck spread: EVERY link starts thin and grows over its own fade-in (so a rewired
-      // link on a mature cohort no longer blinks on already-fat). The max it grows to
-      // scales with cohort maturity — older cohorts get fatter necks.
-      const mature = clamp01((n.cohortTime - CFG.tMaster) / CFG.edgeGrow);
-      const target = 0.18 + 0.5 * mature;
-      const v = 0.12 + (target - 0.12) * clamp01(n.linkAge / (CFG.linkFade * 1.5));
-      metaball(edges, n.x, n.y, n.r, t.x, t.y, t.r, n.masterColor, alpha, v);
+      if (usePng) {
+        // Stretched sprite from node CENTER to node center; node cores render on top and hide
+        // its ends. Thickness = edgePngWidth, easing up over the link's fade-in like the neck.
+        const dx = t.x - n.x, dy = t.y - n.y, d = Math.hypot(dx, dy);
+        const grow = clamp01(n.linkAge / (CFG.linkFade * 1.5));
+        const s = edgeSprite(ei++);
+        s.visible = true; s.tint = n.masterColor; s.alpha = alpha;
+        s.x = n.x; s.y = n.y; s.rotation = Math.atan2(dy, dx);
+        s.width = d; s.height = CFG.edgePngWidth * (0.5 + 0.5 * grow);
+      } else {
+        // Neck spread: EVERY link starts thin and grows over its own fade-in (so a rewired
+        // link on a mature cohort no longer blinks on already-fat). The max it grows to
+        // scales with cohort maturity — older cohorts get fatter necks.
+        const mature = clamp01((n.cohortTime - CFG.tMaster) / CFG.edgeGrow);
+        const target = 0.18 + 0.5 * mature;
+        const v = 0.12 + (target - 0.12) * clamp01(n.linkAge / (CFG.linkFade * 1.5));
+        metaball(edges, n.x, n.y, n.r, t.x, t.y, t.r, n.masterColor, alpha, v);
+      }
     }
+    for (; ei < edgePool.length; ei++) edgePool[ei].visible = false; // hide unused beams
 
     field.update(dt);
 
@@ -638,11 +686,11 @@ export function createNodeGraph(app) {
     if (!state) return;
     if (state.params) Object.assign(CFG, JSON.parse(JSON.stringify(state.params)));
     field.setSystems(CFG.particleSystems); // rebuild emitters for the loaded systems
-    applyNodeGraphics();                    // reload node core/halo textures
+    applyTextures();                        // reload node core/halo + edge textures
     fstack.sig = ""; eventFX.clear(); filterSig = ""; // force the composed filter stack to rebuild
   }
   // Let the UI re-apply particle-system / node-graphic edits live.
   function applyParticles() { field.setSystems(CFG.particleSystems); }
 
-  return { container, update, destroy, params: CFG, controls: CONTROLS, getState, setState, applyParticles, applyNodeGraphics };
+  return { container, update, destroy, params: CFG, controls: CONTROLS, getState, setState, applyParticles, applyTextures };
 }

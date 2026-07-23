@@ -170,8 +170,8 @@ export async function startPixiApp({ mount }) {
         const g = document.createElement("div"); g.className = "grp"; g.textContent = c.group;
         ctrlPanel.appendChild(g);
       }
-      // text controls (node core/halo PNG paths) rebuild node sprites on edit; others apply live
-      ctrlPanel.appendChild(makeControlRow(c, params, "r", c.type === "text" ? () => current.applyNodeGraphics?.() : undefined));
+      // text controls (node/edge PNG paths) reload textures on edit; others apply live
+      ctrlPanel.appendChild(makeControlRow(c, params, "r", c.type === "text" ? () => current.applyTextures?.() : undefined));
     }
     if (Array.isArray(params.filters)) buildFilterEditor(params.filters);
     if (params.particleSystems) buildParticleEditor(params.particleSystems);

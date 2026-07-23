@@ -298,6 +298,11 @@ neck's draw range, `(r1+r2)·6`), weighted to the closest few, so the edge relia
 partner still rotates for a live "jostle." A node briefly shows no neck while a link fades in/out on
 rewire, or before it passes `tMaster`.
 
+**Edge style** (Edges group): **metaball** (default — the generated gooey neck, drawn edge-to-edge)
+or **png** — a stretched sprite from node **center to node center** (so it tucks under the cores and
+avoids the metaball's hourglass pinch when nodes stack close). Set **Edge PNG** (blank = a generated
+soft beam, tinted to the cohort color) and scale thickness with **Edge width**.
+
 ### Assets
 Drop referenced files anywhere under `frontend/` (the dev server serves it): PNGs (e.g.
 `frontend/assets/*.png`) for particle/node textures, and emitter JSON (e.g. `frontend/assets/emitters/*.json`)
@@ -314,6 +319,7 @@ so the placeholders resolve out of the box (all white/grayscale, so they tint pe
 | `assets/ring.png` | ring-burst / ripple | thin bright ring |
 | `assets/node.png` | node **Core PNG** | solid disc, soft edge |
 | `assets/glow.png` | node **Halo PNG** | wide soft glow |
+| `assets/beam.png` | edge **Edge PNG** (png style) | horizontal soft beam |
 | `assets/emitters/example.json` | a system's **Emitter JSON** | starter editor config |
 
 Paste any of these paths (e.g. `/assets/spark.png`) into a system's PNG field or the Core/Halo PNG
