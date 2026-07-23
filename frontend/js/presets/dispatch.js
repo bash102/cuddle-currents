@@ -35,9 +35,9 @@ function applyProp(node, prop, ctx, isHit, params, curve) {
   } else {
     const h = (node.hold = node.hold || {});
     if (curve && curve !== "static" && (prop === "scale" || prop === "opacity")) {
-      const v = (amt ?? 0.15) * propCurve(curve, node.phase); // HR-driven waveform
-      if (prop === "scale") h.scale = v;                       // grows on the beat
-      else h.opacity = -(amt ?? 0.15) * (1 - propCurve(curve, node.phase)); // full alpha on beat, dims between
+      const c = propCurve(curve, node.phase * (params?.rate ?? 1)); // HR-driven waveform (rate = ×BPM)
+      if (prop === "scale") h.scale = (amt ?? 0.15) * c;       // grows on the beat
+      else h.opacity = -(amt ?? 0.15) * (1 - c);               // full alpha on beat, dims between
     } else {
       if (prop === "scale") h.scale = amt ?? 0.15;             // steady offset
       else if (prop === "opacity") h.opacity = -(amt ?? 0.15); // steady dim

@@ -405,8 +405,10 @@ export async function startPixiApp({ mount }) {
       const wrap = note(); wrap.textContent = "property settings:"; box.appendChild(wrap);
       if (continuous && (r.ref === "scale" || r.ref === "opacity")) {
         // programmatic waveform driven by the node's HR phase
+        if (r.params.rate === undefined) r.params.rate = 1;
         box.appendChild(makeControlRow({ key: "curve", label: "Curve", type: "select", options: CURVES, tip: "How the value follows the heartbeat: cosine (smooth breathe) · bounce (sharp thump) · triangle · pulse (blip) · static." }, r, "r fp"));
         box.appendChild(makeControlRow({ key: "amount", label: "Amount", min: 0, max: 1.5, step: 0.02, tip: "Depth of the modulation (× base)." }, r.params, "r fp"));
+        box.appendChild(makeControlRow({ key: "rate", label: "Rate", min: 0.25, max: 4, step: 0.25, tip: "Frequency vs the actual heartbeat — 0.5 = half speed, 1 = 1:1, 2 = double." }, r.params, "r fp"));
       } else {
         if (r.params.dur === undefined) r.params.dur = 0.4;
         if (r.ref !== "color") box.appendChild(makeControlRow({ key: "amount", label: "Amount", min: 0, max: 1.5, step: 0.05, tip: "Strength of the pop/dip (× base)" }, r.params, "r fp"));
