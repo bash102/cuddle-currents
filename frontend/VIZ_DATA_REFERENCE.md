@@ -1,5 +1,37 @@
 # Visualization Data Reference
 
+## Running the preset harness
+
+No build step and no `npm install` — the Pixi / pixi-filters / particle-emitter libs are
+vendored under `frontend/vendor/` and loaded via the import map in `dev.html`. Just serve
+`frontend/` over HTTP (ES modules need `http://`, not `file://`):
+
+```
+cd frontend
+python3 -m http.server 8081
+# then open http://127.0.0.1:8081/dev.html
+```
+
+**The page has two halves:**
+- **Left — the stage.** The live PixiJS render of the current preset.
+- **Right — the dev controls.** *Data* controls (numbered): add/remove people, pick a sync
+  **scenario** (in_sync / two_cliques / anti_phase / independent), tune noise, and edit each
+  person's driver variables (rest HR, envelope rate/phase/depth). This drives the visuals; it
+  is **not** the backend — to render off live bands instead, point the app at `/ws`.
+
+**Designing presets (the panel under the title):**
+- **Open Preset** (top-left button) — switch between presets / Import a saved `.json`.
+- **Save · Save As… · Rename · Reset** (top of the control panel) — all operate on the **whole
+  preset** (physics, colors, filters, particles, events — everything `getState()` captures),
+  saved to `localStorage`.
+- Grouped sliders (Physics, Motion, Cohort Lifecycle, Edges, Nodes, Colors) plus editors for the
+  **Filter Stack**, **Particle Systems**, and **Events** (see §5). Edits apply live.
+
+**Assets** referenced by path (particle/node PNGs, emitter JSON) go anywhere under `frontend/`;
+the server serves them, and presets store only the path (e.g. `/assets/spark.png`).
+
+---
+
 Everything a preset can draw comes from one object — the **`StateFrame`**, broadcast
 ~10×/second over `/ws` (live bands) or produced identically by the dev harness
 (`frontend/js/sim/`). This is the single contract; presets render off this and nothing
