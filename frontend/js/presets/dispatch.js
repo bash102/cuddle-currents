@@ -10,6 +10,8 @@
 // events apply → frameEnd(). Locations resolve to a world point: the node, its cohort's
 // centroid, or screen center. See events.js for the schema the editor drives.
 
+const clamp01 = (x) => (x < 0 ? 0 : x > 1 ? 1 : x);
+
 // Apply a property reaction to a node. HIT = a decaying pop/blink/flash; CONTINUOUS = a steady
 // hold refreshed each frame (cleared by the renderer before dispatch). `graphic` is a no-op
 // (there's no alternate node sprite to swap yet).
@@ -25,7 +27,7 @@ function propCurve(name, phase) {
   }
 }
 
-function applyProp(node, prop, ctx, isHit, params, curve) {
+function applyProp(node, prop, ctx, isHit, params, curve, trigger) {
   const amt = params?.amount, dur = params?.dur;
   if (isHit) {
     const p = (node.pulse = node.pulse || {});
@@ -35,7 +37,16 @@ function applyProp(node, prop, ctx, isHit, params, curve) {
     else if (prop === "color") p.color = { to: 0xffffff, t: 0, dur: dur ?? 0.4 };          // white flash
   } else {
     const h = (node.hold = node.hold || {});
-    if (curve && curve !== "static" && (prop === "scale" || prop === "opacity" || prop === "halo")) {
+    if (trigger === "modulate") {
+      // timed ramp keyed to cohort-time (ramps 0→amount over `dur` s after `onset` s in a cohort);
+      // outside a cohort cohortTime is 0 so it targets 0 and the renderer eases it back on leave.
+      const ramp = clamp01((node.cohortTime - (params?.onset ?? 0)) / Math.max(0.05, dur ?? 1));
+      const a = amt ?? 0.2;
+      if (prop === "scale") h.modScale = a * ramp;
+      else if (prop === "halo") h.modHalo = a * ramp;
+      else if (prop === "opacity") h.modOpacity = -a * ramp;
+      else if (prop === "color") { h.modColorTo = ctx.cohortColor; h.modColorMix = ramp; }
+    } else if (curve && curve !== "static" && (prop === "scale" || prop === "opacity" || prop === "halo")) {
       const c = propCurve(curve, node.phase * (params?.rate ?? 1)); // HR-driven waveform (rate = ×BPM)
       if (prop === "scale") h.scale = (amt ?? 0.15) * c;       // core grows on the beat
       else if (prop === "halo") h.haloScale = (amt ?? 0.15) * c; // halo grows on the beat
@@ -73,7 +84,7 @@ export class Choreographer {
       if (r.active === false || r.trigger === "hit") continue;
       const [x, y] = this._loc(r.location, ctx);
       if (r.type === "particle" && r.ref) this.field.attach(r.ref, node.pid, x, y, this._pcolor(r.ref, ctx));
-      else if (r.type === "property" && r.ref) applyProp(node, r.ref, ctx, false, r.params, r.curve);
+      else if (r.type === "property" && r.ref) applyProp(node, r.ref, ctx, false, r.params, r.curve, r.trigger);
       // continuous filters are intentionally unsupported — event filters are momentary ripples.
     }
   }

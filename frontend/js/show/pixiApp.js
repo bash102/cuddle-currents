@@ -400,16 +400,25 @@ export async function startPixiApp({ mount }) {
       box.appendChild(makeControlRow({ key: "dur", label: "Duration", min: 0.1, max: 2.5, step: 0.05, tip: "How long the ripple animates (s)" }, r.params, "r fp"));
     } else if (r.type === "property") {
       r.params = r.params || {};
-      if (r.params.amount === undefined) r.params.amount = r.ref === "opacity" ? 0.6 : 0.5;
-      const continuous = r.trigger !== "hit";
       const wrap = note(); wrap.textContent = "property settings:"; box.appendChild(wrap);
-      if (continuous && (r.ref === "scale" || r.ref === "opacity" || r.ref === "halo")) {
-        // programmatic waveform driven by the node's HR phase
+      if (r.trigger === "modulate") {
+        // timed ramp keyed to cohort-time (fade-to-master, scale-up, exit unwind)
+        if (r.params.amount === undefined) r.params.amount = r.ref === "color" ? 1 : 0.2;
+        if (r.params.onset === undefined) r.params.onset = 0;
+        if (r.params.dur === undefined) r.params.dur = 1;
+        box.appendChild(makeControlRow({ key: "amount", label: r.ref === "color" ? "Mix" : "Amount", min: 0, max: r.ref === "color" ? 1 : 1.5, step: 0.02, tip: "Target depth of the ramp — color: mix toward the cohort color; scale/halo: × base; opacity: dim." }, r.params, "r fp"));
+        box.appendChild(makeControlRow({ key: "onset", label: "Onset", min: 0, max: 8, step: 0.1, tip: "Seconds in the cohort before the ramp begins." }, r.params, "r fp"));
+        box.appendChild(makeControlRow({ key: "dur", label: "Duration", min: 0.1, max: 6, step: 0.1, tip: "Seconds to ramp from nothing to full. Also eases back this fast when the node leaves." }, r.params, "r fp"));
+      } else if (r.trigger !== "hit" && (r.ref === "scale" || r.ref === "opacity" || r.ref === "halo")) {
+        // continuous programmatic waveform driven by the node's HR phase
+        if (r.params.amount === undefined) r.params.amount = 0.5;
         if (r.params.rate === undefined) r.params.rate = 1;
         box.appendChild(makeControlRow({ key: "curve", label: "Curve", type: "select", options: CURVES, tip: "How the value follows the heartbeat: cosine (smooth breathe) · bounce (sharp thump) · triangle · pulse (blip) · static." }, r, "r fp"));
         box.appendChild(makeControlRow({ key: "amount", label: "Amount", min: 0, max: 1.5, step: 0.02, tip: "Depth of the modulation (× base)." }, r.params, "r fp"));
         box.appendChild(makeControlRow({ key: "rate", label: "Rate", min: 0.25, max: 4, step: 0.25, tip: "Frequency vs the actual heartbeat — 0.5 = half speed, 1 = 1:1, 2 = double." }, r.params, "r fp"));
       } else {
+        // hit pulse
+        if (r.params.amount === undefined) r.params.amount = r.ref === "opacity" ? 0.6 : 0.5;
         if (r.params.dur === undefined) r.params.dur = 0.4;
         if (r.ref !== "color") box.appendChild(makeControlRow({ key: "amount", label: "Amount", min: 0, max: 1.5, step: 0.05, tip: "Strength of the pop/dip (× base)" }, r.params, "r fp"));
         box.appendChild(makeControlRow({ key: "dur", label: "Duration", min: 0.05, max: 1.5, step: 0.05, tip: "Hit reactions fade over this many seconds" }, r.params, "r fp"));

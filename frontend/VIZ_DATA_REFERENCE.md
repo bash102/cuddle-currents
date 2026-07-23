@@ -275,7 +275,11 @@ A preset binds **reactions** to each (in `CFG.events`, edited in the Events pane
   (node scale-pop / opacity-dip / color-flash).
 - **ref** — the particle-system name, filter type, or property.
 - **location** — where it resolves: `node`, `cohort centroid`, or `world` (screen center).
-- **trigger** — `hit` (once, at the moment) or `continuous`/`modulate` (every frame the state holds).
+- **trigger** — `hit` (fire once), `continuous` (every frame the state holds — e.g. an HR curve), or
+  `modulate` (a **timed ramp**: 0→target over **Duration** after **Onset** seconds in the state, and
+  eases back on exit). The cohort-join lifecycle (**fade-to-master color** and **scale-up**) is now
+  two `joined · property · modulate` reactions instead of hardcoded — edit their Amount/Onset/Duration
+  in the Events panel.
 
 Each reaction has an **on/off toggle**. A **particle** reaction shows **no params here** — just a
 pointer to edit that system in the Particle Systems panel (a system is a shared, named thing, edited

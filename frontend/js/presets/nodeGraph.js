@@ -169,14 +169,8 @@ export const CONTROLS = [
     tip: "Seconds in cohort before gravity ramps in." },
   { group: "Cohort Lifecycle", key: "tMaster", label: "Master @", min: 0, max: 5, step: 0.1,
     tip: "Seconds in cohort before a master is chosen + links appear." },
-  { group: "Cohort Lifecycle", key: "tFade", label: "Color fade @", min: 0, max: 6, step: 0.1,
-    tip: "Seconds before children begin fading to master color." },
-  { group: "Cohort Lifecycle", key: "tScale", label: "Scale @", min: 0, max: 8, step: 0.1,
-    tip: "Seconds before members scale up." },
-  { group: "Cohort Lifecycle", key: "scaleMax", label: "Scale to", min: 1, max: 1.6, step: 0.05,
-    tip: "How big members grow when fully in a cohort (× base)." },
-  { group: "Cohort Lifecycle", key: "exitDur", label: "Exit", min: 0.1, max: 2, step: 0.1,
-    tip: "Seconds to unwind color + scale when a node leaves a cohort." },
+  // Color-fade, scale-up, and exit unwind moved to the 'Node Joins Cohort' event as MODULATE
+  // property reactions (edit their Amount / Onset / Duration there).
   { group: "Cohort Lifecycle", key: "grace", label: "Grace", min: 0, max: 1, step: 0.05,
     tip: "Flicker tolerance before a node counts as having left." },
 
@@ -631,21 +625,20 @@ export function createNodeGraph(app) {
     for (let i = glows.length - 1; i >= 0; i--) if (!glows[i].seen) glows.splice(i, 1); // cohort dissolved / merged away
 
     // --- render nodes (compute radius + tint) + continuous particle aura ---
+    const lifeK = 1 - Math.exp(-dt * 8); // ease for the modulate lifecycle (smooth ramp + release)
     for (const n of arr) {
-      let tint, cohortScale;
-      if (n.cohortTime > 0) {
-        // Master fades to the cohort color too — normally that's its own identity (no change),
-        // but when its cohort's hue was rotated to avoid a color clash it must follow suit.
-        const fadeAmt = (n.masterColor != null) ? clamp01((n.cohortTime - CFG.tFade) / CFG.fadeRamp) : 0;
-        tint = fadeAmt > 0 ? lerpColor(n.colorNum, n.masterColor, fadeAmt) : n.colorNum;
-        cohortScale = 1 + (CFG.scaleMax - 1) * clamp01((n.cohortTime - CFG.tScale) / CFG.scaleRamp);
-      } else if (n.exitT > 0) {
-        const k = n.exitT / CFG.exitDur;
-        tint = lerpColor(n.colorNum, n.exitColor, k);
-        cohortScale = 1 + (n.exitScale - 1) * k;
-      } else { tint = n.colorNum; cohortScale = 1; }
-      // property-reaction pulses/holds (scale pop, color flash, opacity dip, HR curves) from the dispatcher
-      const baseCohortScale = cohortScale; // lifecycle scale before reaction pulse — the halo uses this
+      // Cohort lifecycle (scale-up, fade-to-master) comes from the `joined` MODULATE reactions:
+      // the dispatcher sets targets in n.hold each frame (0 when out of a cohort), and these eased
+      // values follow them up on join and back down on leave (replacing the old exit unwind).
+      const h = n.hold;
+      n.smScale = (n.smScale ?? 0) + (((h && h.modScale) || 0) - (n.smScale ?? 0)) * lifeK;
+      n.smHalo = (n.smHalo ?? 0) + (((h && h.modHalo) || 0) - (n.smHalo ?? 0)) * lifeK;
+      n.smColorMix = (n.smColorMix ?? 0) + (((h && h.modColorMix) || 0) - (n.smColorMix ?? 0)) * lifeK;
+      if (h && h.modColorTo != null) n.smColorTo = h.modColorTo; // latch the cohort color while supplied
+      let cohortScale = 1 + n.smScale;
+      let tint = (n.smColorMix > 0.002 && n.smColorTo != null) ? lerpColor(n.colorNum, n.smColorTo, clamp01(n.smColorMix)) : n.colorNum;
+      // per-node reaction pulses/holds/HR-curves (scale pop, color flash, HR breathe) on top
+      const baseCohortScale = cohortScale; // lifecycle scale before the HR core pulse — the halo uses this
       const efx = nodeFx(n, dt);
       if (efx.scale) cohortScale *= 1 + efx.scale;
       if (efx.colorMix > 0 && efx.colorTo != null) tint = lerpColor(tint, efx.colorTo, clamp01(efx.colorMix));
@@ -660,7 +653,7 @@ export function createNodeGraph(app) {
       n.halo.visible = CFG.haloOn;
       // halo uses the pre-reaction (core) scale so it's independent of the core; its own pulse comes
       // from the "halo" property reaction (efx.haloScale) plus the intrinsic haloPulse px.
-      if (CFG.haloOn) { const hr = CFG.baseR * baseCohortScale * CFG.haloScale * (1 + efx.haloScale) + CFG.haloPulse * beat; n.halo.width = n.halo.height = 2 * hr; n.halo.alpha = CFG.haloAlpha; }
+      if (CFG.haloOn) { const hr = CFG.baseR * baseCohortScale * CFG.haloScale * (1 + efx.haloScale + n.smHalo) + CFG.haloPulse * beat; n.halo.width = n.halo.height = 2 * hr; n.halo.alpha = CFG.haloAlpha; }
       n.label.x = n.x; n.label.y = n.y + CFG.baseR * cohortScale + 7; n.label.alpha = nodeAlpha;
       // White while solo (over black); dark once in a cohort but wrapped in a cohort-color
       // outer glow so the dark text stays legible over the bright center AND the black edges.

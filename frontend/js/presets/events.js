@@ -40,6 +40,8 @@ export function defaultEvents() {
           { active: true, type: "property", ref: "halo", location: "node", trigger: "continuous", curve: "cosine", params: { amount: 0.5, rate: 1 } },
         ]
       : e.id === "joined" ? [
+          { active: true, type: "property", ref: "color", location: "node", trigger: "modulate", params: { amount: 1.0, onset: 2.0, dur: 1.0 } }, // fade to master color
+          { active: true, type: "property", ref: "scale", location: "node", trigger: "modulate", params: { amount: 0.2, onset: 3.0, dur: 1.0 } }, // grow to ~120%
           { active: true, type: "particle", ref: "joinBurst", location: "node", trigger: "hit" },   // celebratory spray
           { active: true, type: "particle", ref: "ringBurst", location: "node", trigger: "hit" },    // per-node ripple (scales)
           { active: true, type: "filter", ref: "shockwave", location: "cohort centroid", trigger: "hit" }, // one big cohort ripple
