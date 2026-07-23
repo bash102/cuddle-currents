@@ -118,7 +118,7 @@ const CFG = {
   // coreTexture/haloTexture = optional PNG path/URL (blank = generated disc). See particles for
   // the same path convention.
   coreTexture: "", haloTexture: "", haloScale: 1.9, haloAlpha: 0.16, haloOn: true,
-  beatPulse: 3.5, haloPulse: 12,  // heartbeat scale-pulse (px) for the core / halo — 0 = steady
+  beatPulse: 0, haloPulse: 12,  // intrinsic px heartbeat pulse: core (0 — the HR event drives it) / halo
   // particle systems (named, friendly-param; see particles.js) — referenced by events
   particleSystems: defaultParticleSystems(),
   // events / choreography (see events.js) — reactions bound to renderer events
@@ -289,7 +289,8 @@ export function createNodeGraph(app) {
   glowLayer.blendMode = "add";
   const glowSprites = new Container(); // PNG cohort glow when cohortGlowTexture is set
   const glowPool = [];                 // reused glow sprites, one per cohort
-  const glowState = new Map();         // master pid -> smoothed { x, y, R } so the glow tweens
+  const glows = [];                    // smoothed { x, y, R } per cohort, matched by proximity so
+                                       // the glow tweens across member AND master changes
   const edges = new Graphics();       // metaball connector necks (edgeStyle "metaball")
   const edgeSprites = new Container(); // stretched-PNG connectors (edgeStyle "png")
   const edgePool = [];                 // reused edge sprites, one per drawn link
@@ -579,6 +580,7 @@ export function createNodeGraph(app) {
     for (const n of arr) {
       const ctx = ctxFor(n);
       choreo.state("activated", n, ctx, EV);                              // continuous: alive
+      choreo.state("hr", n, ctx, EV);                                     // continuous: HR-driven curves
       if (inCohortOf(n)) choreo.state("joined", n, ctx, EV);              // continuous: in a cohort
       if (n.conn === "disconnected") choreo.state("disconnected", n, ctx, EV);
       if (!n.everActive) { n.everActive = true; choreo.hit("activated", n, ctx, EV); }
@@ -593,13 +595,14 @@ export function createNodeGraph(app) {
     choreo.frameEnd(); // tear down continuous emitters that weren't refreshed this frame
 
     // --- cohort ambient glow behind each cohort: generated additive circles, or a PNG sprite ---
-    // The centre + radius are eased through glowState (keyed by the master, a stable anchor) so the
-    // glow tweens when a cohort gains/loses a member instead of snapping to the new geometry.
+    // The centre + radius are eased through a pool of glow states matched to cohorts by spatial
+    // proximity, so a glow tracks its cohort across member OR master changes and tweens instead of
+    // snapping. A cohort with no nearby prior glow is new (snaps in; the strength fade hides it).
     glowLayer.clear();
     const glowPng = !!glowTex;
     glowLayer.visible = !glowPng;
     glowSprites.visible = glowPng;
-    for (const gs of glowState.values()) gs.seen = false;
+    for (const g of glows) g.seen = false;
     const gk = 1 - Math.exp(-dt * CFG.cohortGlowTween); // frame-rate-independent ease factor
     let gi = 0;
     for (const [root, c] of cent) {
@@ -607,11 +610,12 @@ export function createNodeGraph(app) {
       const tx = c.sx / c.cnt, ty = c.sy / c.cnt;
       let tR = 40;
       for (const n of grp) tR = Math.max(tR, Math.hypot(n.x - tx, n.y - ty));
-      let gs = glowState.get(m.pid);
-      if (!gs) { gs = { x: tx, y: ty, R: tR }; glowState.set(m.pid, gs); } // new cohort/master -> snap
-      else { gs.x += (tx - gs.x) * gk; gs.y += (ty - gs.y) * gk; gs.R += (tR - gs.R) * gk; }
-      gs.seen = true;
-      const gx = gs.x, gy = gs.y, R = gs.R;
+      let g = null, bestD = Infinity;
+      for (const cand of glows) { if (cand.seen) continue; const d = Math.hypot(tx - cand.x, ty - cand.y); if (d < bestD) { bestD = d; g = cand; } }
+      if (!g || bestD > Math.max(tR, g.R) + 60) { g = { x: tx, y: ty, R: tR }; glows.push(g); } // no nearby prior glow -> new
+      g.seen = true;
+      g.x += (tx - g.x) * gk; g.y += (ty - g.y) * gk; g.R += (tR - g.R) * gk;
+      const gx = g.x, gy = g.y, R = g.R;
       const strength = clamp01((m.cohortTime - CFG.cohortGlowOnset) / Math.max(0.05, CFG.cohortGlowFade));
       if (glowPng) {
         const s = glowSprite(gi++);
@@ -624,7 +628,7 @@ export function createNodeGraph(app) {
       }
     }
     for (; gi < glowPool.length; gi++) glowPool[gi].visible = false;
-    for (const [key, gs] of glowState) if (!gs.seen) glowState.delete(key); // cohort dissolved / master changed
+    for (let i = glows.length - 1; i >= 0; i--) if (!glows[i].seen) glows.splice(i, 1); // cohort dissolved / merged away
 
     // --- render nodes (compute radius + tint) + continuous particle aura ---
     for (const n of arr) {
@@ -640,7 +644,8 @@ export function createNodeGraph(app) {
         tint = lerpColor(n.colorNum, n.exitColor, k);
         cohortScale = 1 + (n.exitScale - 1) * k;
       } else { tint = n.colorNum; cohortScale = 1; }
-      // property-reaction pulses/holds (scale pop, color flash, opacity dip) from the dispatcher
+      // property-reaction pulses/holds (scale pop, color flash, opacity dip, HR curves) from the dispatcher
+      const baseCohortScale = cohortScale; // lifecycle scale before reaction pulse — the halo uses this
       const efx = nodeFx(n, dt);
       if (efx.scale) cohortScale *= 1 + efx.scale;
       if (efx.colorMix > 0 && efx.colorTo != null) tint = lerpColor(tint, efx.colorTo, clamp01(efx.colorMix));
@@ -653,8 +658,8 @@ export function createNodeGraph(app) {
       n.core.tint = tint; n.halo.tint = tint;
       n.core.width = n.core.height = 2 * r;                        // sprite sized to the core diameter
       n.halo.visible = CFG.haloOn;
-      // halo pulses independently of the core (haloPulse), so you can have a steady halo on a beating core
-      if (CFG.haloOn) { const hr = CFG.baseR * cohortScale * CFG.haloScale + CFG.haloPulse * beat; n.halo.width = n.halo.height = 2 * hr; n.halo.alpha = CFG.haloAlpha; }
+      // halo uses the pre-reaction scale + its own haloPulse, so it's independent of the HR scale reaction
+      if (CFG.haloOn) { const hr = CFG.baseR * baseCohortScale * CFG.haloScale + CFG.haloPulse * beat; n.halo.width = n.halo.height = 2 * hr; n.halo.alpha = CFG.haloAlpha; }
       n.label.x = n.x; n.label.y = n.y + CFG.baseR * cohortScale + 7; n.label.alpha = nodeAlpha;
       // White while solo (over black); dark once in a cohort but wrapped in a cohort-color
       // outer glow so the dark text stays legible over the bright center AND the black edges.

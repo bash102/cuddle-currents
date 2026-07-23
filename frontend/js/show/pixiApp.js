@@ -11,7 +11,7 @@ import { getFrame } from "../store.js";
 import { PRESETS, RENDERERS } from "../presets/registry.js";
 import { FILTERS, FILTER_ORDER } from "../presets/filters.js";
 import { SYSTEM_PARAMS, newParticleSystem, systemToConfig } from "../presets/particles.js";
-import { REACTION_TYPES, LOCATIONS, TRIGGERS, makeReaction } from "../presets/events.js";
+import { REACTION_TYPES, LOCATIONS, TRIGGERS, CURVES, makeReaction } from "../presets/events.js";
 
 const CSS = `
 #preset-open { position: fixed; top: 14px; left: 14px; z-index: 20; font: 12px system-ui, sans-serif;
@@ -372,7 +372,7 @@ export async function startPixiApp({ mount }) {
         box.querySelector(".actchk").onchange = (e) => { r.active = e.target.checked; box.classList.toggle("off", !e.target.checked); };
         box.querySelectorAll("select").forEach((s) => {
           // type OR ref change re-renders so the exposed settings match the new target
-          s.onchange = () => { r[s.dataset.k] = s.value; if (s.dataset.k === "type") r.ref = ""; if (s.dataset.k === "type" || s.dataset.k === "ref") buildControls(); };
+          s.onchange = () => { r[s.dataset.k] = s.value; if (s.dataset.k === "type") r.ref = ""; if (["type", "ref", "trigger"].includes(s.dataset.k)) buildControls(); };
         });
         box.querySelector(".del").onclick = () => { ev.reactions.splice(ri, 1); buildControls(); };
         ctrlPanel.appendChild(box);
@@ -401,10 +401,17 @@ export async function startPixiApp({ mount }) {
     } else if (r.type === "property") {
       r.params = r.params || {};
       if (r.params.amount === undefined) r.params.amount = r.ref === "opacity" ? 0.6 : 0.5;
-      if (r.params.dur === undefined) r.params.dur = 0.4;
+      const continuous = r.trigger !== "hit";
       const wrap = note(); wrap.textContent = "property settings:"; box.appendChild(wrap);
-      if (r.ref !== "color") box.appendChild(makeControlRow({ key: "amount", label: "Amount", min: 0, max: 1.5, step: 0.05, tip: "Strength of the pop/dip (× base)" }, r.params, "r fp"));
-      box.appendChild(makeControlRow({ key: "dur", label: "Duration", min: 0.05, max: 1.5, step: 0.05, tip: "Hit reactions fade over this many seconds" }, r.params, "r fp"));
+      if (continuous && (r.ref === "scale" || r.ref === "opacity")) {
+        // programmatic waveform driven by the node's HR phase
+        box.appendChild(makeControlRow({ key: "curve", label: "Curve", type: "select", options: CURVES, tip: "How the value follows the heartbeat: cosine (smooth breathe) · bounce (sharp thump) · triangle · pulse (blip) · static." }, r, "r fp"));
+        box.appendChild(makeControlRow({ key: "amount", label: "Amount", min: 0, max: 1.5, step: 0.02, tip: "Depth of the modulation (× base)." }, r.params, "r fp"));
+      } else {
+        if (r.params.dur === undefined) r.params.dur = 0.4;
+        if (r.ref !== "color") box.appendChild(makeControlRow({ key: "amount", label: "Amount", min: 0, max: 1.5, step: 0.05, tip: "Strength of the pop/dip (× base)" }, r.params, "r fp"));
+        box.appendChild(makeControlRow({ key: "dur", label: "Duration", min: 0.05, max: 1.5, step: 0.05, tip: "Hit reactions fade over this many seconds" }, r.params, "r fp"));
+      }
     }
   }
 

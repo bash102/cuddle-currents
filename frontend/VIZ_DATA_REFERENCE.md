@@ -266,7 +266,9 @@ opens the Pixi editor (https://userland.pixijs.io/particle-emitter-editor/) in a
 edit a file there, save it, and point Emitter JSON at it.
 
 ### Events → reactions (choreography)
-The renderer emits a fixed `EVENT_CATALOG` — **activated, joined, left, disconnected, beat, removed**.
+The renderer emits a fixed `EVENT_CATALOG` — **activated, hr, joined, left, disconnected, beat, removed**.
+(`hr` = a continuous per-frame state driven by the person's heartbeat phase; `beat` = a discrete hit,
+once per heartbeat.)
 A preset binds **reactions** to each (in `CFG.events`, edited in the Events panel). A reaction is
 `{ type, ref, location, trigger }`:
 - **type** — `particle` (fire a system), `filter` (positioned animated filter), or `property`
@@ -278,8 +280,16 @@ A preset binds **reactions** to each (in `CFG.events`, edited in the Events pane
 Each reaction has an **on/off toggle**. A **particle** reaction shows **no params here** — just a
 pointer to edit that system in the Particle Systems panel (a system is a shared, named thing, edited
 once, not per event). A **filter** reaction shows that instance's params (amplitude, wavelength… +
-Duration) — the center comes from `location`. A **property** reaction shows Amount + Duration. Filter
-and property params are stored **on the reaction**.
+Duration) — the center comes from `location`. A **property** reaction is either a **hit** pulse
+(Amount + Duration — scale pop / opacity dip / color flash) or, on a **continuous** trigger, a
+**programmatic waveform** of the HR phase: a **Curve** (cosine / bounce / triangle / pulse / static)
+× Amount applied to `scale` or `opacity`. Filter and property params are stored **on the reaction**.
+
+The default **Node Reacts to HR** event carries `property · scale · continuous · cosine` — the
+heartbeat scale-pulse, now editable: switch the curve, retarget to `opacity`, or change the depth.
+(The node's intrinsic px pulse `beatPulse` defaults to 0; the halo keeps its own `haloPulse`.) To fire
+**one particle per heartbeat at a node** (world-space), add a **particle** reaction to the **Beat**
+event — location `node`, trigger `hit` — pointing at a system whose **Burst** is `1`.
 
 Defaults: `activated → aura` (continuous, node), `joined → joinBurst` (hit) **+ shockwave** (hit,
 node — the ripple). Event filters are capped at 4 concurrent passes so a mass sync can't stack

@@ -13,7 +13,19 @@
 // Apply a property reaction to a node. HIT = a decaying pop/blink/flash; CONTINUOUS = a steady
 // hold refreshed each frame (cleared by the renderer before dispatch). `graphic` is a no-op
 // (there's no alternate node sprite to swap yet).
-function applyProp(node, prop, ctx, isHit, params) {
+// Programmatic waveform of the node's HR phase (0..1), for continuous property reactions.
+function propCurve(name, phase) {
+  const t = (phase / (2 * Math.PI)) % 1; // position within the current beat, 0..1
+  switch (name) {
+    case "cosine": return 0.5 + 0.5 * Math.cos(phase);        // smooth breathe, peak on the beat
+    case "bounce": { const b = 0.5 + 0.5 * Math.cos(phase); return b * b * b; } // sharp thump
+    case "triangle": return 1 - Math.abs(t * 2 - 1);          // linear up/down
+    case "pulse": return t < 0.3 ? 1 : 0;                     // blip on the beat
+    default: return 1;                                        // static
+  }
+}
+
+function applyProp(node, prop, ctx, isHit, params, curve) {
   const amt = params?.amount, dur = params?.dur;
   if (isHit) {
     const p = (node.pulse = node.pulse || {});
@@ -22,9 +34,15 @@ function applyProp(node, prop, ctx, isHit, params) {
     else if (prop === "color") p.color = { to: 0xffffff, t: 0, dur: dur ?? 0.4 };          // white flash
   } else {
     const h = (node.hold = node.hold || {});
-    if (prop === "scale") h.scale = amt ?? 0.15;                 // steady offset
-    else if (prop === "opacity") h.opacity = -(amt ?? 0.15);     // steady dim
-    else if (prop === "color") h.color = ctx.cohortColor ?? node.colorNum;
+    if (curve && curve !== "static" && (prop === "scale" || prop === "opacity")) {
+      const v = (amt ?? 0.15) * propCurve(curve, node.phase); // HR-driven waveform
+      if (prop === "scale") h.scale = v;                       // grows on the beat
+      else h.opacity = -(amt ?? 0.15) * (1 - propCurve(curve, node.phase)); // full alpha on beat, dims between
+    } else {
+      if (prop === "scale") h.scale = amt ?? 0.15;             // steady offset
+      else if (prop === "opacity") h.opacity = -(amt ?? 0.15); // steady dim
+      else if (prop === "color") h.color = ctx.cohortColor ?? node.colorNum;
+    }
   }
 }
 
@@ -52,7 +70,7 @@ export class Choreographer {
       if (r.active === false || r.trigger === "hit") continue;
       const [x, y] = this._loc(r.location, ctx);
       if (r.type === "particle" && r.ref) this.field.attach(r.ref, node.pid, x, y, this._pcolor(r.ref, ctx));
-      else if (r.type === "property" && r.ref) applyProp(node, r.ref, ctx, false, r.params);
+      else if (r.type === "property" && r.ref) applyProp(node, r.ref, ctx, false, r.params, r.curve);
       // continuous filters are intentionally unsupported — event filters are momentary ripples.
     }
   }
@@ -65,7 +83,7 @@ export class Choreographer {
       const [x, y] = this._loc(r.location, ctx);
       if (r.type === "particle" && r.ref) this.field.burstSystem(r.ref, x, y, this._pcolor(r.ref, ctx));
       else if (r.type === "filter" && r.ref) this.eventFX.spawn(r.ref, x, y, r.params);
-      else if (r.type === "property" && r.ref) applyProp(node, r.ref, ctx, true, r.params);
+      else if (r.type === "property" && r.ref) applyProp(node, r.ref, ctx, true, r.params, r.curve);
     }
   }
 }
