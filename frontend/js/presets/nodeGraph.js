@@ -221,8 +221,8 @@ export const CONTROLS = [
 
   { group: "Nodes", key: "baseR", label: "Node size", min: 4, max: 30, step: 1,
     tip: "Base radius of the node core (px). Beat pulse + cohort scale-up are added on top." },
-  { group: "Nodes", key: "nodeTint", label: "Tint", type: "select", options: ["identity", "none"],
-    tip: "identity = tint the core/halo to the node's (or cohort's) color · none = show the PNGs with their own colors, no tint." },
+  { group: "Nodes", key: "nodeTint", label: "Tint", type: "select", options: ["identity", "cohort", "none"],
+    tip: "identity = always tint to the node/cohort color · cohort = untinted while solo, tint to the cohort color once in a cohort · none = never tint (PNGs show their own colors)." },
   { group: "Nodes", key: "coreMode", label: "Core PNG", type: "select", options: ["single", "group"], rebuild: true,
     tip: "single = one PNG for every node · group = a folder of PNGs, each node gets a random one." },
   { group: "Nodes", key: "coreTexture", label: "PNG file", type: "text", placeholder: "/assets/node.png",
@@ -741,7 +741,9 @@ export function createNodeGraph(app) {
       n.smColorMix = (n.smColorMix ?? 0) + (((h && h.modColorMix) || 0) - (n.smColorMix ?? 0)) * lifeK;
       if (h && h.modColorTo != null) n.smColorTo = h.modColorTo; // latch the cohort color while supplied
       let cohortScale = 1 + n.smScale;
-      let tint = (n.smColorMix > 0.002 && n.smColorTo != null) ? lerpColor(n.colorNum, n.smColorTo, clamp01(n.smColorMix)) : n.colorNum;
+      // base color: identity (solo) unless nodeTint is "cohort" (untinted solo, still tints in-cohort)
+      const tintBase = CFG.nodeTint === "cohort" ? 0xffffff : n.colorNum;
+      let tint = (n.smColorMix > 0.002 && n.smColorTo != null) ? lerpColor(tintBase, n.smColorTo, clamp01(n.smColorMix)) : tintBase;
       // per-node reaction pulses/holds/HR-curves (scale pop, color flash, HR breathe) on top
       const baseCohortScale = cohortScale; // lifecycle scale before the HR core pulse — the halo uses this
       const efx = nodeFx(n, dt);
