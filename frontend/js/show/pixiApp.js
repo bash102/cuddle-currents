@@ -428,6 +428,14 @@ export async function startPixiApp({ mount }) {
 
   // The filter stack: each filter has a toggle + reorder, and its params when active.
   function buildFilterEditor(list) {
+    // Self-heal: add any registered filter missing from this preset's stack (inactive), so filters
+    // added after the preset was saved still show up without a Reset.
+    for (const type of FILTER_ORDER) {
+      if (FILTERS[type] && !list.some((f) => f.type === type)) {
+        const params = {}; for (const p of FILTERS[type].params) params[p.key] = p.def;
+        list.push({ type, active: false, params });
+      }
+    }
     const g = document.createElement("div"); g.className = "grp"; g.textContent = "Filter Stack";
     ctrlPanel.appendChild(g);
     list.forEach((f, idx) => {
