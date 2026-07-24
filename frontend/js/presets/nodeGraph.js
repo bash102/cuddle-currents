@@ -133,6 +133,7 @@ const CFG = {
   // node graphic: a solid disc (core) + a bigger, dimmer disc (halo), each tinted per node.
   // coreTexture/haloTexture = optional PNG path/URL (blank = generated disc). See particles for
   // the same path convention.
+  nodeTint: "identity", // "identity" = tint core/halo to the node/cohort color · "none" = show PNGs as-is
   coreMode: "single", coreTexture: "", coreFolder: "", haloTexture: "", haloScale: 1.9, haloAlpha: 0.16, haloOn: true,
   // particle systems (named, friendly-param; see particles.js) — referenced by events
   particleSystems: defaultParticleSystems(),
@@ -220,6 +221,8 @@ export const CONTROLS = [
 
   { group: "Nodes", key: "baseR", label: "Node size", min: 4, max: 30, step: 1,
     tip: "Base radius of the node core (px). Beat pulse + cohort scale-up are added on top." },
+  { group: "Nodes", key: "nodeTint", label: "Tint", type: "select", options: ["identity", "none"],
+    tip: "identity = tint the core/halo to the node's (or cohort's) color · none = show the PNGs with their own colors, no tint." },
   { group: "Nodes", key: "coreMode", label: "Core PNG", type: "select", options: ["single", "group"], rebuild: true,
     tip: "single = one PNG for every node · group = a folder of PNGs, each node gets a random one." },
   { group: "Nodes", key: "coreTexture", label: "PNG file", type: "text", placeholder: "/assets/node.png",
@@ -751,7 +754,8 @@ export function createNodeGraph(app) {
       const r = CFG.baseR * cohortScale;
       n.r = r;
       n.g.x = n.x; n.g.y = n.y; n.g.alpha = nodeAlpha;
-      n.core.tint = tint; n.halo.tint = tint;
+      const drawTint = CFG.nodeTint === "none" ? 0xffffff : tint;  // "none" = untinted PNG (white)
+      n.core.tint = drawTint; n.halo.tint = drawTint;
       n.core.width = n.core.height = 2 * r;                        // sprite sized to the core diameter
       n.halo.visible = CFG.haloOn;
       // halo uses the pre-reaction (core) scale so it's independent of the core; its pulse comes
