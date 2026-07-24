@@ -12,11 +12,15 @@
 
 import { createNodeGraph } from "./nodeGraph.js";
 import { createChord } from "./chord.js";
+import { createScatter } from "./scatter.js";
+import { createDistribution } from "./distribution.js";
 import { defaultFilters } from "./filters.js";
 
 export const RENDERERS = {
   "node-graph": createNodeGraph,
   "chord": createChord,
+  "scatter": createScatter,
+  "distribution": createDistribution,
 };
 
 // Node Chart 2's filter stack: default filters, but bloom softer/wider for a calmer look.
@@ -47,4 +51,10 @@ export const PRESETS = [
 
   // Chord graph — 30 people around a ring, synchrony drawn as bowed arcs between pairs.
   { id: "chord", label: "Chord Graph", renderer: "chord", state: null },
+
+  // Scatter plot — each person at (x, y) from two selectable variables (default HR × HRV).
+  { id: "scatter", label: "Scatter Plot", renderer: "scatter", state: null },
+
+  // Distribution — people binned along one axis and stacked (a beeswarm that peaks as they sync).
+  { id: "distribution", label: "Distribution", renderer: "distribution", state: null },
 ];
