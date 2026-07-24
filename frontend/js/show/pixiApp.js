@@ -146,6 +146,10 @@ export async function startPixiApp({ mount }) {
   if (!Array.isArray(library) || !library.length) {
     library = PRESETS.map((p) => ({ id: p.id, label: p.label, renderer: p.renderer, state: p.state || null }));
   }
+  // Self-heal: add any built-in preset (new renderers) missing from a previously-saved library.
+  for (const p of PRESETS) {
+    if (!library.some((e) => e.id === p.id)) library.push({ id: p.id, label: p.label, renderer: p.renderer, state: p.state || null });
+  }
   const persistLibrary = () => { try { localStorage.setItem(LIB_KEY, JSON.stringify(library)); } catch {} };
   const libEntry = (id) => library.find((p) => p.id === id);
   function commit() {
