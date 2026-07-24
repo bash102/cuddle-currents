@@ -117,7 +117,7 @@ const CFG = {
   // node graphic: a solid disc (core) + a bigger, dimmer disc (halo), each tinted per node.
   // coreTexture/haloTexture = optional PNG path/URL (blank = generated disc). See particles for
   // the same path convention.
-  coreTexture: "", coreFolder: "", haloTexture: "", haloScale: 1.9, haloAlpha: 0.16, haloOn: true,
+  coreMode: "single", coreTexture: "", coreFolder: "", haloTexture: "", haloScale: 1.9, haloAlpha: 0.16, haloOn: true,
   beatPulse: 0, haloPulse: 0,  // intrinsic px heartbeat pulse (both 0 — the HR event drives core + halo)
   // particle systems (named, friendly-param; see particles.js) — referenced by events
   particleSystems: defaultParticleSystems(),
@@ -192,12 +192,16 @@ export const CONTROLS = [
 
   { group: "Nodes", key: "baseR", label: "Node size", min: 4, max: 30, step: 1,
     tip: "Base radius of the node core (px). Beat pulse + cohort scale-up are added on top." },
-  { group: "Nodes", key: "coreTexture", label: "Core PNG", type: "text", placeholder: "/assets/node.png",
+  { group: "Nodes", key: "coreMode", label: "Core PNG", type: "select", options: ["single", "group"], rebuild: true,
+    tip: "single = one PNG for every node · group = a folder of PNGs, each node gets a random one." },
+  { group: "Nodes", key: "coreTexture", label: "PNG file", type: "text", placeholder: "/assets/node.png",
     emptyLabel: "generated", setLabel: "PNG", pick: { dir: "/assets", exts: ["png", "jpg", "jpeg", "webp", "svg", "gif"] },
+    showIf: (p) => p.coreMode !== "group",
     tip: "Path/URL to a PNG for the node core (blank = generated disc). Tinted to the node/cohort color — use white/grayscale art." },
-  { group: "Nodes", key: "coreFolder", label: "Core folder", type: "text", placeholder: "/assets/nodes/",
-    emptyLabel: "off", setLabel: "folder",
-    tip: "Folder of PNGs — each node gets a RANDOM one (overrides Core PNG). Point at a served folder, e.g. /assets/nodes/. Still tinted per node." },
+  { group: "Nodes", key: "coreFolder", label: "PNG folder", type: "text", placeholder: "/assets/nodes/",
+    emptyLabel: "generated", setLabel: "folder",
+    showIf: (p) => p.coreMode === "group",
+    tip: "Folder of PNGs — each node gets a RANDOM one. Point at a served folder, e.g. /assets/nodes/. Still tinted per node." },
   { group: "Nodes", key: "haloOn", label: "Halo", type: "toggle",
     tip: "Show the soft outer halo behind each node." },
   { group: "Nodes", key: "haloTexture", label: "Halo PNG", type: "text", placeholder: "/assets/glow.png",
@@ -352,7 +356,8 @@ export function createNodeGraph(app) {
     haloTex = loadTex(CFG.haloTexture, disc);
     edgeTex = loadTex(CFG.edgeTexture, beam);
     glowTex = CFG.cohortGlowTexture ? loadTex(CFG.cohortGlowTexture, null) : null; // null -> generated circles
-    if (CFG.coreFolder !== coreFolderLoaded) { coreFolderLoaded = CFG.coreFolder; coreTexPool = null; if (CFG.coreFolder) loadCoreFolder(CFG.coreFolder); }
+    const folder = CFG.coreMode === "group" ? CFG.coreFolder : ""; // only the group mode uses the folder
+    if (folder !== coreFolderLoaded) { coreFolderLoaded = folder; coreTexPool = null; if (folder) loadCoreFolder(folder); }
     for (const [, n] of nodes) { n.core.texture = pickCoreTex(n); n.halo.texture = haloTex; }
     for (const s of edgePool) s.texture = edgeTex;
     for (const s of glowPool) if (glowTex) s.texture = glowTex;

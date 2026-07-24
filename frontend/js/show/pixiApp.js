@@ -197,13 +197,16 @@ export async function startPixiApp({ mount }) {
     ctrlPanel.appendChild(buildActionBar()); // Save / Save As / Rename / Reset — saves the WHOLE preset
     let lastGroup = null;
     for (const c of controls) {
+      if (c.showIf && !c.showIf(params)) continue; // conditional visibility (e.g. single vs group PNG)
       if (c.group && c.group !== lastGroup) {
         lastGroup = c.group;
         const g = document.createElement("div"); g.className = "grp"; g.textContent = c.group;
         ctrlPanel.appendChild(g);
       }
-      // text controls (node/edge PNG paths) reload textures on edit; others apply live
-      ctrlPanel.appendChild(makeControlRow(c, params, "r", c.type === "text" ? () => current.applyTextures?.() : undefined));
+      // text controls (node/edge PNG paths) reload textures on edit; `rebuild` controls re-render
+      // the panel (to show/hide dependent fields); others apply live.
+      const onCh = c.type === "text" ? () => current.applyTextures?.() : (c.rebuild ? () => buildControls() : undefined);
+      ctrlPanel.appendChild(makeControlRow(c, params, "r", onCh));
     }
     if (Array.isArray(params.filters)) buildFilterEditor(params.filters);
     if (params.particleSystems) buildParticleEditor(params.particleSystems);
@@ -556,7 +559,10 @@ export async function startPixiApp({ mount }) {
   }
 
   addEventListener("keydown", (e) => {
-    if (e.key === "Escape") dialog.classList.remove("open");
+    if (e.key === "Escape") { dialog.classList.remove("open"); return; }
+    // don't hijack number keys while the user is typing in a field (e.g. Variables Per Person)
+    const t = e.target;
+    if (t && (/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName) || t.isContentEditable)) return;
     const i = parseInt(e.key, 10) - 1;
     if (i >= 0 && i < library.length) select(library[i].id);
   });
