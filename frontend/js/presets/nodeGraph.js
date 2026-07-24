@@ -117,7 +117,7 @@ const CFG = {
   // node graphic: a solid disc (core) + a bigger, dimmer disc (halo), each tinted per node.
   // coreTexture/haloTexture = optional PNG path/URL (blank = generated disc). See particles for
   // the same path convention.
-  coreTexture: "", haloTexture: "", haloScale: 1.9, haloAlpha: 0.16, haloOn: true,
+  coreTexture: "", coreFolder: "", haloTexture: "", haloScale: 1.9, haloAlpha: 0.16, haloOn: true,
   beatPulse: 0, haloPulse: 0,  // intrinsic px heartbeat pulse (both 0 — the HR event drives core + halo)
   // particle systems (named, friendly-param; see particles.js) — referenced by events
   particleSystems: defaultParticleSystems(),
@@ -195,6 +195,9 @@ export const CONTROLS = [
   { group: "Nodes", key: "coreTexture", label: "Core PNG", type: "text", placeholder: "/assets/node.png",
     emptyLabel: "generated", setLabel: "PNG", pick: { dir: "/assets", exts: ["png", "jpg", "jpeg", "webp", "svg", "gif"] },
     tip: "Path/URL to a PNG for the node core (blank = generated disc). Tinted to the node/cohort color — use white/grayscale art." },
+  { group: "Nodes", key: "coreFolder", label: "Core folder", type: "text", placeholder: "/assets/nodes/",
+    emptyLabel: "off", setLabel: "folder",
+    tip: "Folder of PNGs — each node gets a RANDOM one (overrides Core PNG). Point at a served folder, e.g. /assets/nodes/. Still tinted per node." },
   { group: "Nodes", key: "haloOn", label: "Halo", type: "toggle",
     tip: "Show the soft outer halo behind each node." },
   { group: "Nodes", key: "haloTexture", label: "Halo PNG", type: "text", placeholder: "/assets/glow.png",
@@ -304,6 +307,8 @@ export function createNodeGraph(app) {
   // textures when the paths change or a PNG finishes loading.
   const disc = makeDisc(), beam = makeBeam();
   let coreTex = disc, haloTex = disc, edgeTex = beam, glowTex = null; // glowTex null => generated circles
+  let coreTexPool = null;       // textures loaded from CFG.coreFolder — each node picks one at random
+  let coreFolderLoaded = "";    // the folder path currently loaded (to reload on change)
   const texCache = {}; // path -> Texture (loaded) | null (pending) | false (failed)
   function loadTex(path, fallback) {
     if (!path) return fallback;
@@ -318,13 +323,37 @@ export function createNodeGraph(app) {
     }
     return fallback; // pending / failed -> the generated fallback
   }
+  // Load every image in a folder (via the dev server's directory listing) into coreTexPool, then
+  // reassign node textures so each node shows a random one. For ~30 nodes the resulting per-node
+  // textures are ~30 draw calls — fine; a sprite sheet would only matter at hundreds of nodes.
+  function loadCoreFolder(dir) {
+    const base = dir.replace(/\/$/, "");
+    fetch(base + "/").then((r) => r.text()).then((html) => {
+      const doc = new DOMParser().parseFromString(html, "text/html");
+      const files = [...doc.querySelectorAll("a")].map((a) => a.getAttribute("href"))
+        .filter((h) => h && /\.(png|jpe?g|webp|gif)$/i.test(h) && !h.startsWith("/"))
+        .map((h) => base + "/" + decodeURIComponent(h));
+      if (!files.length) { coreTexPool = null; applyTextures(); return; }
+      const pool = []; let remaining = files.length;
+      const done = () => { if (--remaining === 0) { coreTexPool = pool.filter(Boolean); applyTextures(); } };
+      files.forEach((path, i) => {
+        const img = new Image(); img.crossOrigin = "anonymous";
+        img.onload = () => { try { pool[i] = Texture.from(img); } catch {} done(); };
+        img.onerror = () => { console.warn(`node folder image failed: ${path}`); done(); };
+        img.src = path;
+      });
+    }).catch(() => { console.warn(`node folder listing failed: ${dir}`); coreTexPool = null; applyTextures(); });
+  }
+  // The core texture for a node: a stable random pick from the folder pool, else the single texture.
+  const pickCoreTex = (n) => (coreTexPool && coreTexPool.length) ? coreTexPool[Math.floor(n.texSeed * coreTexPool.length) % coreTexPool.length] : coreTex;
   // Reload node core/halo + edge textures and push them onto the live display objects.
   function applyTextures() {
     coreTex = loadTex(CFG.coreTexture, disc);
     haloTex = loadTex(CFG.haloTexture, disc);
     edgeTex = loadTex(CFG.edgeTexture, beam);
     glowTex = CFG.cohortGlowTexture ? loadTex(CFG.cohortGlowTexture, null) : null; // null -> generated circles
-    for (const [, n] of nodes) { n.core.texture = coreTex; n.halo.texture = haloTex; }
+    if (CFG.coreFolder !== coreFolderLoaded) { coreFolderLoaded = CFG.coreFolder; coreTexPool = null; if (CFG.coreFolder) loadCoreFolder(CFG.coreFolder); }
+    for (const [, n] of nodes) { n.core.texture = pickCoreTex(n); n.halo.texture = haloTex; }
     for (const s of edgePool) s.texture = edgeTex;
     for (const s of glowPool) if (glowTex) s.texture = glowTex;
   }
@@ -341,15 +370,17 @@ export function createNodeGraph(app) {
 
   function makeNode(p, w, h) {
     const g = new Container();
+    const texSeed = Math.random(); // stable per node -> stable folder-texture assignment
     const halo = new Sprite(haloTex); halo.anchor.set(0.5);
     const core = new Sprite(coreTex); core.anchor.set(0.5);
     const label = new Text({ text: p.display_name, style: { fill: 0xffffff, fontSize: 12, fontFamily: "system-ui", fontWeight: "600" } });
     label.anchor.set(0.5, 0);
+    core.texture = (coreTexPool && coreTexPool.length) ? coreTexPool[Math.floor(texSeed * coreTexPool.length) % coreTexPool.length] : coreTex;
     g.addChild(halo, core);
     nodesLayer.addChild(g);
     labelsLayer.addChild(label); // outside the bloom group
     return {
-      pid: p.person_id, g, halo, core, label,
+      pid: p.person_id, texSeed, g, halo, core, label,
       x: w / 2 + (Math.random() - 0.5) * w * 0.55,
       y: h / 2 + (Math.random() - 0.5) * h * 0.55,
       vx: 0, vy: 0, driftAngle: Math.random() * 2 * Math.PI, emitAcc: 0,
