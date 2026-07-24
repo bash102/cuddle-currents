@@ -237,6 +237,13 @@ The visual layer is a **PixiJS preset system**. All presets read the same `State
 | `frontend/js/presets/events.js` | The **choreography schema**: `EVENT_CATALOG`, reaction types/locations/triggers, and `defaultEvents()`. |
 | `frontend/js/presets/dispatch.js` | The **choreography runtime** (`Choreographer`) — turns `CFG.events` into live particle/filter/property reactions each frame. |
 
+
+**Layout pull** (Layout control group): the node-graph can draw nodes toward a computed target —
+`free` (physics only), `ring`, `scatter` (x/y by variable), or `column` (binned) — blended with the
+physics via a **Pull** strength (0 = organic float, 1 = snaps into the chart). So one engine spans
+organic → structured. It positions only; the standalone Chord/Scatter/Distribution presets add drawn
+axes/arcs.
+
 Every preset factory returns `{ container, update, destroy, params, controls, getState, setState, applyParticles }`.
 `params`+`controls` drive the on-screen sliders; `getState`/`setState` drive save / switch.
 

@@ -63,6 +63,17 @@ function metaball(g, x1, y1, r1, x2, y2, r2, color, alpha, v, handle = 2.2) {
 
 const R0 = 40; // reference radius the (white) node circle is baked at; tinted + scaled per frame
 
+// Layout-pull placement: variables a node can be positioned by, + the spring stiffness of the pull.
+// Declared before CFG/CONTROLS because CONTROLS references LVAR_KEYS.
+const LVARS = {
+  hr: { label: "HR", get: (n) => n.hr, min: 45, max: 105 },
+  hrv: { label: "HRV", get: (n) => n.rmssd ?? n.hrVar ?? 40, min: 5, max: 90 },
+  phase: { label: "Phase", get: (n) => (((n.phase % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI)), min: 0, max: 2 * Math.PI },
+};
+const LVAR_KEYS = Object.keys(LVARS);
+const lnorm = (v, key) => { const t = (v - LVARS[key].min) / (LVARS[key].max - LVARS[key].min); return t < 0 ? 0 : t > 1 ? 1 : t; };
+const LAYOUT_K = 5; // spring stiffness of the layout pull (× layoutPull)
+
 // Default node sprite = a solid white disc with a soft 1px edge (tinted per node). Used for both
 // the core and the halo unless a preset points them at a PNG.
 function makeDisc(size = 128) {
@@ -93,6 +104,11 @@ function makeBeam(w = 128, h = 48) {
 }
 
 const CFG = {
+  // layout: where nodes are drawn — "free" (physics only) or pulled toward a computed target
+  layout: "free", layoutPull: 0.7,
+  layoutRingR: 0.4,                                   // ring radius fraction
+  layoutXVar: "hr", layoutYVar: "hrv",                // scatter axes
+  layoutVar: "hr", layoutBins: 20,                    // column (distribution) variable + bins
   // idle motion
   drift: 6, driftTurn: 1.6, center: 0.04,
   // cohort attraction (spring to centroid) + collision bounce + cohort separation
@@ -141,6 +157,17 @@ const CFG = {
 // control has a `type` (range | color | toggle | select). getState/setState capture ALL
 // of CFG, so even params not listed here still save — this is just what's editable in-UI.
 export const CONTROLS = [
+  { group: "Layout", key: "layout", label: "Layout", type: "select", options: ["free", "ring", "scatter", "column"], rebuild: true,
+    tip: "Where nodes are drawn: free = physics/gravity only; ring = evenly around a circle; scatter = (x,y) from two variables; column = binned along one variable (a distribution)." },
+  { group: "Layout", key: "layoutPull", label: "Pull", min: 0, max: 1, step: 0.05, showIf: (p) => p.layout !== "free",
+    tip: "How strongly nodes are drawn to the layout target vs free physics. 0 = ignore, 1 = snap into place; in between = drifts but biased." },
+  { group: "Layout", key: "layoutRingR", label: "Ring radius", min: 0.15, max: 0.48, step: 0.01, showIf: (p) => p.layout === "ring",
+    tip: "Ring radius (fraction of the smaller screen dimension)." },
+  { group: "Layout", key: "layoutXVar", label: "X var", type: "select", options: LVAR_KEYS, showIf: (p) => p.layout === "scatter", tip: "Variable driving horizontal position." },
+  { group: "Layout", key: "layoutYVar", label: "Y var", type: "select", options: LVAR_KEYS, showIf: (p) => p.layout === "scatter", tip: "Variable driving vertical position." },
+  { group: "Layout", key: "layoutVar", label: "Variable", type: "select", options: LVAR_KEYS, showIf: (p) => p.layout === "column", tip: "Variable spread along the horizontal axis." },
+  { group: "Layout", key: "layoutBins", label: "Bins", min: 6, max: 50, step: 1, showIf: (p) => p.layout === "column", tip: "Number of columns the axis is divided into." },
+
   { group: "Physics", key: "gravityK", label: "Gravity", min: 0, max: 6, step: 0.1,
     tip: "How strongly cohort members are pulled toward their cohort's center. Higher = tighter, faster gathering." },
   { group: "Physics", key: "linkPull", label: "Jostle", min: 0, max: 1.5, step: 0.05,
@@ -389,7 +416,7 @@ export function createNodeGraph(app) {
       x: w / 2 + (Math.random() - 0.5) * w * 0.55,
       y: h / 2 + (Math.random() - 0.5) * h * 0.55,
       vx: 0, vy: 0, driftAngle: Math.random() * 2 * Math.PI, emitAcc: 0,
-      phase: p.phase ?? 0, hr: p.hr ?? 60, hrVar: p.hr_var,
+      phase: p.phase ?? 0, hr: p.hr ?? 60, hrVar: p.hr_var, rmssd: p.rmssd, tx: null, ty: null,
       alpha: 0, colorNum: hexNum(p.color), color: p.color, name: p.display_name, seat: p.seat ?? 0,
       cohortTime: 0, outTime: 0, exitT: 0, exitColor: hexNum(p.color), exitScale: 1,
       renderTint: hexNum(p.color), renderScale: 1, master: null, masterColor: null,
@@ -398,6 +425,28 @@ export function createNodeGraph(app) {
       conn: p.connection ?? "connected", prevConn: p.connection ?? "connected",
       everActive: false, lastBeatK: undefined, hold: null, pulse: null,
     };
+  }
+
+  // Compute each node's layout target (n.tx, n.ty) for the current layout mode. Free = no target.
+  function computeLayout(arr, w, h, cx, cy) {
+    const N = arr.length; if (!N) return;
+    const mode = CFG.layout;
+    if (mode === "ring") {
+      const R = Math.min(w, h) * CFG.layoutRingR;
+      const order = arr.slice().sort((a, b) => a.seat - b.seat || (a.pid < b.pid ? -1 : 1));
+      order.forEach((n, i) => { const a = (i / N) * 2 * Math.PI - Math.PI / 2; n.tx = cx + Math.cos(a) * R; n.ty = cy + Math.sin(a) * R; });
+    } else if (mode === "scatter") {
+      const xk = LVARS[CFG.layoutXVar] ? CFG.layoutXVar : "hr", yk = LVARS[CFG.layoutYVar] ? CFG.layoutYVar : "hrv";
+      const x0 = w * 0.12, x1 = w * 0.9, y0 = h * 0.86, y1 = h * 0.14;
+      for (const n of arr) { n.tx = x0 + lnorm(LVARS[xk].get(n), xk) * (x1 - x0); n.ty = y0 + lnorm(LVARS[yk].get(n), yk) * (y1 - y0); }
+    } else if (mode === "column") {
+      const key = LVARS[CFG.layoutVar] ? CFG.layoutVar : "hr";
+      const bins = Math.max(1, Math.round(CFG.layoutBins));
+      const x0 = w * 0.08, x1 = w * 0.92, baseY = h * 0.86, binW = (x1 - x0) / bins, spacing = CFG.baseR * 2.2 + 3;
+      const stacks = new Map();
+      for (const n of arr) { const b = Math.min(bins - 1, Math.max(0, Math.floor(lnorm(LVARS[key].get(n), key) * bins))); (stacks.get(b) || stacks.set(b, []).get(b)).push(n); }
+      for (const [b, list] of stacks) { list.sort((a, b2) => (a.pid < b2.pid ? -1 : 1)); list.forEach((n, s) => { n.tx = x0 + (b + 0.5) * binW; n.ty = baseY - (s + 0.5) * spacing; }); }
+    }
   }
 
   function update(frame, dt) {
@@ -416,7 +465,7 @@ export function createNodeGraph(app) {
       seen.add(p.person_id);
       let n = nodes.get(p.person_id);
       if (!n) { n = makeNode(p, w, h); nodes.set(p.person_id, n); }
-      n.color = p.color; n.colorNum = hexNum(p.color); n.hr = p.hr ?? n.hr; n.hrVar = p.hr_var; n.seat = p.seat ?? n.seat;
+      n.color = p.color; n.colorNum = hexNum(p.color); n.hr = p.hr ?? n.hr; n.hrVar = p.hr_var; n.rmssd = p.rmssd ?? n.rmssd; n.seat = p.seat ?? n.seat;
       n.conn = p.connection ?? n.conn;
       if (n.name !== p.display_name) { n.name = p.display_name; n.label.text = p.display_name; }
       n.phase += (n.hr / 60) * 2 * Math.PI * dt;
@@ -546,12 +595,18 @@ export function createNodeGraph(app) {
       c.sx += n.x; c.sy += n.y; c.cnt++;
     }
     const fx = new Map(), fy = new Map();
+    // layout pull: draw each node toward its computed target (ring / scatter / column), blended
+    // with physics. Higher pull also quiets the idle drift so it settles into a clean chart.
+    const layoutOn = CFG.layout !== "free";
+    if (layoutOn) computeLayout(arr, w, h, cx, cy);
+    const pull = layoutOn ? clamp01(CFG.layoutPull) : 0;
     for (const n of arr) {
       n.driftAngle += (Math.random() - 0.5) * CFG.driftTurn * dt;
       const gAmt = clamp01((n.cohortTime - CFG.tGravity) / CFG.gravRamp);
-      const driftK = CFG.drift * (1 - 0.85 * gAmt);
+      const driftK = CFG.drift * (1 - 0.85 * gAmt) * (1 - pull);
       fx.set(n, (cx - n.x) * CFG.center + Math.cos(n.driftAngle) * driftK);
       fy.set(n, (cy - n.y) * CFG.center + Math.sin(n.driftAngle) * driftK);
+      if (layoutOn && n.tx != null) { fx.set(n, fx.get(n) + (n.tx - n.x) * pull * LAYOUT_K); fy.set(n, fy.get(n) + (n.ty - n.y) * pull * LAYOUT_K); }
     }
     for (let i = 0; i < N; i++) {
       const c = cent.get(comp[i]); if (!c) continue;
