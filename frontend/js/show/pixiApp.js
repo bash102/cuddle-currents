@@ -148,7 +148,11 @@ export async function startPixiApp({ mount }) {
   }
   const persistLibrary = () => { try { localStorage.setItem(LIB_KEY, JSON.stringify(library)); } catch {} };
   const libEntry = (id) => library.find((p) => p.id === id);
-  function commit() { const e = libEntry(currentId); if (e && current?.getState) { e.state = current.getState(); persistLibrary(); } }
+  function commit() {
+    // flush a field being edited: text/textarea commit on blur, so make sure the focused one fires
+    try { const a = document.activeElement; if (a && a.blur && ctrlPanel.contains(a)) a.blur(); } catch {}
+    const e = libEntry(currentId); if (e && current?.getState) { e.state = current.getState(); persistLibrary(); }
+  }
 
   // ---- Open button + dialog ----
   function refreshOpenBtn() { const e = libEntry(currentId); openBtn.innerHTML = `Open Preset<span class="cur">${e ? e.label : "—"}</span>`; }
@@ -341,6 +345,7 @@ export async function startPixiApp({ mount }) {
       ctrlPanel.appendChild(act);
       ctrlPanel.appendChild(makeControlRow({ key: "texture", label: "PNG", type: "text", placeholder: "/assets/spark.png", emptyLabel: "soft dot", setLabel: "PNG", pick: { dir: "/assets", exts: ["png", "jpg", "jpeg", "webp", "svg", "gif"] }, tip: "Texture path or URL served by the frontend — blank uses the soft dot" }, sys, "r fp", onEdit));
       ctrlPanel.appendChild(makeControlRow({ key: "shape", label: "Shape", type: "select", options: ["scatter", "ring"], tip: "scatter = spray in random directions · ring = particles fly radially outward from the spawn point (an expanding ring ripple)" }, sys, "r fp", onEdit));
+      if (sys.config) { const nt = document.createElement("div"); nt.className = "rxn-set"; nt.textContent = "↓ overridden by the Emitter JSON (clear ✕ to use sliders)"; ctrlPanel.appendChild(nt); }
       for (const p of SYSTEM_PARAMS) {
         if (p.only && p.only !== sys.type) continue;
         ctrlPanel.appendChild(makeControlRow(p, sys, "r fp", onEdit));
