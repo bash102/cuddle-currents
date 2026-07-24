@@ -108,7 +108,7 @@ const CFG = {
   layout: "free", layoutPull: 0.7,
   layoutRingR: 0.4,                                   // ring radius fraction
   layoutXVar: "hr", layoutYVar: "hrv",                // scatter axes
-  layoutVar: "hr", layoutBins: 20,                    // column (distribution) variable + bins
+  layoutColX: "spread", layoutColY: "stack",          // column: how columns order (X) / members stack (Y)
   // idle motion
   drift: 6, driftTurn: 1.6, center: 0.04,
   // cohort attraction (spring to centroid) + collision bounce + cohort separation
@@ -165,8 +165,10 @@ export const CONTROLS = [
     tip: "Ring radius (fraction of the smaller screen dimension)." },
   { group: "Layout", key: "layoutXVar", label: "X var", type: "select", options: LVAR_KEYS, showIf: (p) => p.layout === "scatter", tip: "Variable driving horizontal position." },
   { group: "Layout", key: "layoutYVar", label: "Y var", type: "select", options: LVAR_KEYS, showIf: (p) => p.layout === "scatter", tip: "Variable driving vertical position." },
-  { group: "Layout", key: "layoutVar", label: "Variable", type: "select", options: LVAR_KEYS, showIf: (p) => p.layout === "column", tip: "Variable spread along the horizontal axis." },
-  { group: "Layout", key: "layoutBins", label: "Bins", min: 6, max: 50, step: 1, showIf: (p) => p.layout === "column", tip: "Number of columns the axis is divided into." },
+  { group: "Layout", key: "layoutColX", label: "Column X", type: "select", options: ["spread", ...LVAR_KEYS], showIf: (p) => p.layout === "column",
+    tip: "How the columns are ordered left→right: spread = arbitrary even spacing; or by a variable (the group's average). Each cohort is one column; each solo is its own." },
+  { group: "Layout", key: "layoutColY", label: "Column Y", type: "select", options: ["stack", ...LVAR_KEYS], showIf: (p) => p.layout === "column",
+    tip: "How members stack within a column: stack = seat order; or sorted by a variable (lowest at the base)." },
 
   { group: "Physics", key: "gravityK", label: "Gravity", min: 0, max: 6, step: 0.1,
     tip: "How strongly cohort members are pulled toward their cohort's center. Higher = tighter, faster gathering." },
@@ -428,7 +430,8 @@ export function createNodeGraph(app) {
   }
 
   // Compute each node's layout target (n.tx, n.ty) for the current layout mode. Free = no target.
-  function computeLayout(arr, w, h, cx, cy) {
+  // cohortKey(n) returns a shared key for cohort mates, a unique key for solos (used by "column").
+  function computeLayout(arr, w, h, cx, cy, cohortKey) {
     const N = arr.length; if (!N) return;
     const mode = CFG.layout;
     if (mode === "ring") {
@@ -440,12 +443,23 @@ export function createNodeGraph(app) {
       const x0 = w * 0.12, x1 = w * 0.9, y0 = h * 0.86, y1 = h * 0.14;
       for (const n of arr) { n.tx = x0 + lnorm(LVARS[xk].get(n), xk) * (x1 - x0); n.ty = y0 + lnorm(LVARS[yk].get(n), yk) * (y1 - y0); }
     } else if (mode === "column") {
-      const key = LVARS[CFG.layoutVar] ? CFG.layoutVar : "hr";
-      const bins = Math.max(1, Math.round(CFG.layoutBins));
-      const x0 = w * 0.08, x1 = w * 0.92, baseY = h * 0.86, binW = (x1 - x0) / bins, spacing = CFG.baseR * 2.2 + 3;
-      const stacks = new Map();
-      for (const n of arr) { const b = Math.min(bins - 1, Math.max(0, Math.floor(lnorm(LVARS[key].get(n), key) * bins))); (stacks.get(b) || stacks.set(b, []).get(b)).push(n); }
-      for (const [b, list] of stacks) { list.sort((a, b2) => (a.pid < b2.pid ? -1 : 1)); list.forEach((n, s) => { n.tx = x0 + (b + 0.5) * binW; n.ty = baseY - (s + 0.5) * spacing; }); }
+      // Each cohort is one column; each solo is its own. Columns spread across the width; members
+      // stack upward from the baseline. So as people cohort, their columns merge into tall stacks.
+      const groups = new Map();
+      for (const n of arr) { const k = cohortKey(n); (groups.get(k) || groups.set(k, []).get(k)).push(n); }
+      const list = [...groups.values()];
+      const colX = CFG.layoutColX, colY = CFG.layoutColY;
+      const avg = (g, key) => g.reduce((s, n) => s + LVARS[key].get(n), 0) / g.length;
+      const minPid = (g) => g.reduce((m, n) => (n.pid < m ? n.pid : m), g[0].pid);
+      if (LVARS[colX]) list.sort((a, b) => avg(a, colX) - avg(b, colX)); // order columns by a variable
+      else list.sort((a, b) => (minPid(a) < minPid(b) ? -1 : 1));         // "spread": stable arbitrary order
+      const G = list.length, x0 = w * 0.08, x1 = w * 0.92, baseY = h * 0.86, spacing = CFG.baseR * 2.2 + 3;
+      list.forEach((g, gi) => {
+        const gx = G <= 1 ? (x0 + x1) / 2 : x0 + (gi / (G - 1)) * (x1 - x0);
+        if (LVARS[colY]) g.sort((a, b) => LVARS[colY].get(a) - LVARS[colY].get(b)); // stack by a variable
+        else g.sort((a, b) => (a.seat - b.seat) || (a.pid < b.pid ? -1 : 1));         // "stack": seat order
+        g.forEach((n, s) => { n.tx = gx; n.ty = baseY - (s + 0.5) * spacing; });
+      });
     }
   }
 
@@ -598,7 +612,9 @@ export function createNodeGraph(app) {
     // layout pull: draw each node toward its computed target (ring / scatter / column), blended
     // with physics. Higher pull also quiets the idle drift so it settles into a clean chart.
     const layoutOn = CFG.layout !== "free";
-    if (layoutOn) computeLayout(arr, w, h, cx, cy);
+    // cohort mates share a key (so "column" stacks them together); solos get a unique key.
+    const cohortKey = (n) => { const root = comp[pos.get(n)]; const grp = members.get(root); return (grp && grp.length >= 2) ? ("c" + root) : ("s" + n.pid); };
+    if (layoutOn) computeLayout(arr, w, h, cx, cy, cohortKey);
     const pull = layoutOn ? clamp01(CFG.layoutPull) : 0;
     for (const n of arr) {
       n.driftAngle += (Math.random() - 0.5) * CFG.driftTurn * dt;
