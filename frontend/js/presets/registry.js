@@ -11,10 +11,12 @@
 // getState, setState }.
 
 import { createNodeGraph } from "./nodeGraph.js";
+import { createChord } from "./chord.js";
 import { defaultFilters } from "./filters.js";
 
 export const RENDERERS = {
   "node-graph": createNodeGraph,
+  "chord": createChord,
 };
 
 // Node Chart 2's filter stack: default filters, but bloom softer/wider for a calmer look.
@@ -42,4 +44,7 @@ export const PRESETS = [
       },
     },
   },
+
+  // Chord graph — 30 people around a ring, synchrony drawn as bowed arcs between pairs.
+  { id: "chord", label: "Chord Graph", renderer: "chord", state: null },
 ];
