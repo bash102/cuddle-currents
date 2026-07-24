@@ -11,7 +11,7 @@ import { getFrame } from "../store.js";
 import { PRESETS, RENDERERS } from "../presets/registry.js";
 import { FILTERS, FILTER_ORDER } from "../presets/filters.js";
 import { SYSTEM_PARAMS, newParticleSystem, systemToConfig } from "../presets/particles.js";
-import { REACTION_TYPES, LOCATIONS, TRIGGERS, CURVES, makeReaction } from "../presets/events.js";
+import { REACTION_TYPES, LOCATIONS, TRIGGERS, CURVES, SOURCES, EVENT_CATALOG, makeReaction } from "../presets/events.js";
 
 const CSS = `
 #preset-open { position: fixed; top: 14px; left: 14px; z-index: 20; font: 12px system-ui, sans-serif;
@@ -62,6 +62,9 @@ const CSS = `
 #preset-ctrl .fp { padding-left: 10px; border-left: 2px solid rgba(232,102,63,0.3); margin-left: 2px; }
 #preset-ctrl .fp label { flex: 0 0 60px; }
 #preset-ctrl .fhdr .ren { opacity: .5; font-size: 10px; }
+#preset-ctrl .fhdr .evname { cursor: help; }
+#preset-ctrl .fhdr .evinfo { flex: 0 0 auto; cursor: help; opacity: .5; font-size: 11px; }
+#preset-ctrl .fhdr .evinfo:hover { opacity: 1; }
 #preset-ctrl .fhdr .add { cursor: pointer; opacity: .55; font-size: 13px; padding: 0 2px; }
 #preset-ctrl .fhdr .add:hover { opacity: 1; }
 #preset-ctrl .rxn { margin: 3px 0 5px 8px; padding: 4px 6px; border-left: 2px solid rgba(255,255,255,0.12);
@@ -367,9 +370,12 @@ export async function startPixiApp({ mount }) {
     ctrlPanel.appendChild(g);
     // particle refs show the system's label but store its key (so it matches the Particle Systems panel)
     const refOptions = (r) => r.type === "particle" ? Object.keys(systems).map((k) => ({ v: k, t: systems[k].label || k })) : r.type === "filter" ? FILTER_ORDER : ["scale", "halo", "opacity", "color", "graphic"];
+    const evTip = (id) => (EVENT_CATALOG.find((e) => e.id === id)?.tip || "").replace(/"/g, "&quot;");
     events.forEach((ev) => {
       const hdr = document.createElement("div"); hdr.className = "fhdr";
-      hdr.innerHTML = `<span class="fname">${ev.label}</span><span class="mv add" title="add reaction">＋</span>`;
+      const tip = evTip(ev.id);
+      hdr.innerHTML = `<span class="fname evname" title="${tip}">${ev.label}</span>
+        <span class="evinfo" title="${tip}">ⓘ</span><span class="mv add" title="add reaction">＋</span>`;
       hdr.querySelector(".add").onclick = () => { ev.reactions.push(makeReaction("particle")); buildControls(); };
       ctrlPanel.appendChild(hdr);
       ev.reactions.forEach((r, ri) => {
@@ -422,12 +428,16 @@ export async function startPixiApp({ mount }) {
         box.appendChild(makeControlRow({ key: "onset", label: "Onset", min: 0, max: 8, step: 0.1, tip: "Seconds in the cohort before the ramp begins." }, r.params, "r fp"));
         box.appendChild(makeControlRow({ key: "dur", label: "Duration", min: 0.1, max: 6, step: 0.1, tip: "Seconds to ramp from nothing to full. Also eases back this fast when the node leaves." }, r.params, "r fp"));
       } else if (r.trigger !== "hit" && (r.ref === "scale" || r.ref === "opacity" || r.ref === "halo")) {
-        // continuous programmatic waveform driven by the node's HR phase
+        // continuous reaction driven by a data source (beat oscillation, or a mapped value)
         if (r.params.amount === undefined) r.params.amount = 0.5;
         if (r.params.rate === undefined) r.params.rate = 1;
-        box.appendChild(makeControlRow({ key: "curve", label: "Curve", type: "select", options: CURVES, tip: "How the value follows the heartbeat: cosine (smooth breathe) · bounce (sharp thump) · triangle · pulse (blip) · static." }, r, "r fp"));
-        box.appendChild(makeControlRow({ key: "amount", label: "Amount", min: 0, max: 1.5, step: 0.02, tip: "Depth of the modulation (× base)." }, r.params, "r fp"));
-        box.appendChild(makeControlRow({ key: "rate", label: "Rate", min: 0.25, max: 4, step: 0.25, tip: "Frequency vs the actual heartbeat — 0.5 = half speed, 1 = 1:1, 2 = double." }, r.params, "r fp"));
+        if (r.source === undefined) r.source = "beat";
+        box.appendChild(makeControlRow({ key: "source", label: "Source", type: "select", options: SOURCES, tip: "What drives it: beat = oscillate at the heartbeat (shape with Curve); hr / hrv / phase = map the person's current value onto the property (bigger value → more effect)." }, r, "r fp", () => buildControls()));
+        if (r.source === "beat") {
+          box.appendChild(makeControlRow({ key: "curve", label: "Curve", type: "select", options: CURVES, tip: "How it follows the heartbeat: cosine (smooth breathe) · bounce (sharp thump) · triangle · pulse (blip) · static." }, r, "r fp"));
+          box.appendChild(makeControlRow({ key: "rate", label: "Rate", min: 0.25, max: 4, step: 0.25, tip: "Frequency vs the actual heartbeat — 0.5 = half speed, 1 = 1:1, 2 = double." }, r.params, "r fp"));
+        }
+        box.appendChild(makeControlRow({ key: "amount", label: "Amount", min: 0, max: 1.5, step: 0.02, tip: "Depth of the effect (× base)." }, r.params, "r fp"));
       } else {
         // hit pulse
         if (r.params.amount === undefined) r.params.amount = r.ref === "opacity" ? 0.6 : 0.5;

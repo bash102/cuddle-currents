@@ -27,7 +27,22 @@ function propCurve(name, phase) {
   }
 }
 
-function applyProp(node, prop, ctx, isHit, params, curve, trigger) {
+// Value sources for a continuous property reaction (get + normalization range). "beat" isn't here —
+// it oscillates via propCurve. These map the person's current VALUE onto the property.
+const SOURCES = {
+  hr: { get: (n) => n.hr ?? 60, min: 45, max: 105 },
+  hrv: { get: (n) => n.rmssd ?? n.hrVar ?? 40, min: 5, max: 90 },
+  phase: { get: (n) => (((n.phase ?? 0) % (2 * Math.PI)) / (2 * Math.PI)), min: 0, max: 1 },
+};
+// The 0..1 driver for a continuous property reaction: a heartbeat oscillation (source "beat", shaped
+// by the curve at `rate`×) or the node's current normalized value (source hr / hrv / phase).
+function contDriver(node, source, curve, rate) {
+  const s = SOURCES[source];
+  if (s) { const t = (s.get(node) - s.min) / (s.max - s.min); return t < 0 ? 0 : t > 1 ? 1 : t; }
+  return propCurve(curve || "cosine", node.phase * (rate ?? 1)); // "beat"
+}
+
+function applyProp(node, prop, ctx, isHit, params, curve, trigger, source) {
   const amt = params?.amount, dur = params?.dur;
   if (isHit) {
     const p = (node.pulse = node.pulse || {});
@@ -46,16 +61,13 @@ function applyProp(node, prop, ctx, isHit, params, curve, trigger) {
       else if (prop === "halo") h.modHalo = a * ramp;
       else if (prop === "opacity") h.modOpacity = -a * ramp;
       else if (prop === "color") { h.modColorTo = ctx.cohortColor; h.modColorMix = ramp; }
-    } else if (curve && curve !== "static" && (prop === "scale" || prop === "opacity" || prop === "halo")) {
-      const c = propCurve(curve, node.phase * (params?.rate ?? 1)); // HR-driven waveform (rate = ×BPM)
-      if (prop === "scale") h.scale = (amt ?? 0.15) * c;       // core grows on the beat
-      else if (prop === "halo") h.haloScale = (amt ?? 0.15) * c; // halo grows on the beat
-      else h.opacity = -(amt ?? 0.15) * (1 - c);               // full alpha on beat, dims between
-    } else {
-      if (prop === "scale") h.scale = amt ?? 0.15;             // steady offset
-      else if (prop === "halo") h.haloScale = amt ?? 0.15;
-      else if (prop === "opacity") h.opacity = -(amt ?? 0.15); // steady dim
-      else if (prop === "color") h.color = ctx.cohortColor ?? node.colorNum;
+    } else if (prop === "scale" || prop === "opacity" || prop === "halo") {
+      const d = contDriver(node, source, curve, params?.rate); // 0..1 from beat or a value source
+      if (prop === "scale") h.scale = (amt ?? 0.15) * d;
+      else if (prop === "halo") h.haloScale = (amt ?? 0.15) * d;
+      else h.opacity = -(amt ?? 0.15) * (1 - d);
+    } else if (prop === "color") {
+      h.color = ctx.cohortColor ?? node.colorNum;
     }
   }
 }
@@ -84,7 +96,7 @@ export class Choreographer {
       if (r.active === false || r.trigger === "hit") continue;
       const [x, y] = this._loc(r.location, ctx);
       if (r.type === "particle" && r.ref) this.field.attach(r.ref, node.pid, x, y, this._pcolor(r.ref, ctx));
-      else if (r.type === "property" && r.ref) applyProp(node, r.ref, ctx, false, r.params, r.curve, r.trigger);
+      else if (r.type === "property" && r.ref) applyProp(node, r.ref, ctx, false, r.params, r.curve, r.trigger, r.source);
       // continuous filters are intentionally unsupported — event filters are momentary ripples.
     }
   }
