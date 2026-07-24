@@ -240,6 +240,17 @@ The visual layer is a **PixiJS preset system**. All presets read the same `State
 Every preset factory returns `{ container, update, destroy, params, controls, getState, setState, applyParticles }`.
 `params`+`controls` drive the on-screen sliders; `getState`/`setState` drive save / switch.
 
+### Other renderers (same `StateFrame`, different visual metaphor)
+| Renderer / file | What it shows |
+|---|---|
+| **Chord Graph** — `frontend/js/presets/chord.js` | 30 people around a ring; each pair with synchrony above a threshold is joined by an arc bowing to the centre (thickness/opacity ∝ sync). |
+| **Scatter Plot** — `frontend/js/presets/scatter.js` | Each person a dot at (x, y) from two **selectable** variables (`VARS`: HR / HRV / phase; default HR × HRV). Dots ease to position, so convergence reads as clustering. |
+| **Distribution** — `frontend/js/presets/distribution.js` | One selectable variable along the horizontal axis; dots binned + stacked (beeswarm) so synchrony forms a peak. |
+
+Add a whole new engine by writing a `createX(app)` factory that returns the interface above and
+registering it in `registry.js` (`RENDERERS` + a `PRESETS` entry). These three reuse the `FilterStack`
+(bloom) but have no particle/event systems, so those editors just don't appear for them.
+
 ### Particle systems (harness-authored)
 Systems are **named friendly-param defs** stored in `CFG.particleSystems` and edited live in the
 Particle Systems panel (Shape, Rate/Burst, Life, Speed, Scale, Spawn R). Three are built-in and
