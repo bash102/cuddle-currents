@@ -10,8 +10,9 @@
 
 import {
   AdvancedBloomFilter, GlowFilter, OutlineFilter, BulgePinchFilter,
-  ZoomBlurFilter, RGBSplitFilter, AdjustmentFilter, ShockwaveFilter, TwistFilter,
+  ZoomBlurFilter, RGBSplitFilter, AdjustmentFilter, ShockwaveFilter, TwistFilter, BevelFilter,
 } from "../../vendor/pixi-filters.min.mjs";
+import { BlurFilter } from "../../vendor/pixi.min.mjs";
 
 const hexNum = (hex) => (typeof hex === "string" ? parseInt(hex.replace("#", ""), 16) : hex);
 // Set a filter's center/offset point, whether it's a PointData {x,y} or a [x,y] array.
@@ -123,11 +124,39 @@ export const FILTERS = {
     // As an event filter: a swirling ripple that winds up then unwinds.
     fx: { dur: 0.8, animate: (f, age, dur, x, y) => { const k = age / dur; try { f.radius = 40 + k * 220; f.angle = 5 * Math.sin(Math.PI * k); setPt(f, "offset", x, y); } catch {} } },
   },
+  blur: {
+    label: "Blur",
+    make: () => new BlurFilter(),
+    params: [
+      { key: "strength", label: "Strength", min: 0, max: 20, step: 0.5, def: 4 },
+      { key: "quality", label: "Quality", min: 1, max: 10, step: 1, def: 4 },
+    ],
+    apply: (f, p) => {
+      try { f.strength = p.strength; } catch {}
+      try { if (typeof f.strength !== "number") f.blur = p.strength; } catch {}
+      try { f.quality = p.quality; } catch {}
+    },
+    // As an event filter: a quick blur pulse that clears.
+    fx: { dur: 0.5, animate: (f, age, dur) => { const s = 12 * Math.sin(Math.PI * (age / dur)); try { f.strength = s; } catch { try { f.blur = s; } catch {} } } },
+  },
+  bevel: {
+    label: "Bevel",
+    make: () => new BevelFilter(),
+    params: [
+      { key: "rotation", label: "Angle", min: 0, max: 360, step: 5, def: 45 },
+      { key: "thickness", label: "Thickness", min: 0, max: 10, step: 0.5, def: 2 },
+      { key: "lightAlpha", label: "Light α", min: 0, max: 1, step: 0.05, def: 0.7 },
+      { key: "shadowAlpha", label: "Shadow α", min: 0, max: 1, step: 0.05, def: 0.7 },
+      { key: "lightColor", label: "Light", type: "color", def: "#ffffff" },
+      { key: "shadowColor", label: "Shadow", type: "color", def: "#000000" },
+    ],
+    apply: (f, p) => { try { f.rotation = p.rotation; f.thickness = p.thickness; f.lightAlpha = p.lightAlpha; f.shadowAlpha = p.shadowAlpha; f.lightColor = hexNum(p.lightColor); f.shadowColor = hexNum(p.shadowColor); } catch {} },
+  },
 };
 
 // Order the stack editor lists / seeds filters in. Shockwave + Twist are here so they can be
 // picked as event-filter reactions; they're inert in the static stack (they need animating).
-export const FILTER_ORDER = ["bloom", "glow", "outline", "adjust", "rgbSplit", "bulgePinch", "zoomBlur", "twist", "shockwave"];
+export const FILTER_ORDER = ["bloom", "glow", "outline", "bevel", "adjust", "rgbSplit", "blur", "bulgePinch", "zoomBlur", "twist", "shockwave"];
 
 // A fresh stack: every filter present (so the UI can toggle any), only bloom active.
 export function defaultFilters() {

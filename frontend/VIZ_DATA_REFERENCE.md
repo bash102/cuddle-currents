@@ -300,8 +300,8 @@ node — the ripple). Event filters are capped at 4 concurrent passes so a mass 
 dozens of full-screen shockwaves.
 
 ### Filters, counted
-The static **Filter Stack** (bloom, glow, outline, color-grade, rgb-split, bulge/pinch, zoom-blur,
-twist, shockwave) runs as an ordered post-process over the bloom group; order + params are UI-editable
+The static **Filter Stack** (bloom, glow, outline, bevel, color-grade, rgb-split, blur, bulge/pinch,
+zoom-blur, twist, shockwave) runs as an ordered post-process over the bloom group; order + params are UI-editable
 and only bloom is on by default. **Shockwave** and **Twist** are also usable as event filters (they
 need animating — inert in the static stack). Adding a filter = import its class + one `FILTERS` entry;
 add an `fx` descriptor to make it fireable as a positioned event filter.
