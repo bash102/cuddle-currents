@@ -328,8 +328,7 @@ add an `fx` descriptor to make it fireable as a positioned event filter.
 Each node is two tinted sprites: an opaque **core** and a bigger, dimmer **halo** — by default a
 generated soft disc, tinted to the node/cohort color. The **Nodes** control group exposes **Node
 size**, **Core PNG** + **Halo PNG** (path/URL, blank = disc — tinted, so use white/grayscale art),
-**Halo** on/off, **Halo size** (× core), **Halo alpha**, and the heartbeat **Beat pulse** (core) +
-**Halo pulse** (halo, independent — 0 = steady). PNGs load async with a disc fallback.
+**Halo** on/off, **Halo size** (× core), **Halo alpha**. The heartbeat pulse is the **Node Reacts to HR** event (scale + halo reactions), not a node slider. PNGs load async with a disc fallback.
 
 ### Edges
 Edges are **not** a full graph — each node draws one metaball neck to a single **rotating partner**,

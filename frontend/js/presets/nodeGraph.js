@@ -134,7 +134,6 @@ const CFG = {
   // coreTexture/haloTexture = optional PNG path/URL (blank = generated disc). See particles for
   // the same path convention.
   coreMode: "single", coreTexture: "", coreFolder: "", haloTexture: "", haloScale: 1.9, haloAlpha: 0.16, haloOn: true,
-  beatPulse: 0, haloPulse: 0,  // intrinsic px heartbeat pulse (both 0 — the HR event drives core + halo)
   // particle systems (named, friendly-param; see particles.js) — referenced by events
   particleSystems: defaultParticleSystems(),
   // events / choreography (see events.js) — reactions bound to renderer events
@@ -216,7 +215,7 @@ export const CONTROLS = [
   { group: "Edges", key: "edgeTexture", label: "Edge PNG", type: "text", placeholder: "/assets/beam.png",
     emptyLabel: "generated", setLabel: "PNG", pick: { dir: "/assets", exts: ["png", "jpg", "jpeg", "webp", "svg", "gif"] },
     tip: "PNG stretched along each connection (png style). Blank = a generated soft beam. Tinted to the cohort color — use white/grayscale art." },
-  { group: "Edges", key: "edgePngWidth", label: "Edge width", min: 2, max: 60, step: 1,
+  { group: "Edges", key: "edgePngWidth", label: "Edge width", min: 2, max: 100, step: 1,
     tip: "Thickness of the PNG edge beam (px)." },
 
   { group: "Nodes", key: "baseR", label: "Node size", min: 4, max: 30, step: 1,
@@ -239,11 +238,7 @@ export const CONTROLS = [
   { group: "Nodes", key: "haloScale", label: "Halo size", min: 1, max: 4, step: 0.1,
     tip: "Halo diameter relative to the node core." },
   { group: "Nodes", key: "haloAlpha", label: "Halo alpha", min: 0, max: 1, step: 0.02,
-    tip: "Opacity of the halo (multiplied by the node's own fade-in)." },
-  { group: "Nodes", key: "beatPulse", label: "Beat pulse", min: 0, max: 12, step: 0.5,
-    tip: "How much the node core grows on each heartbeat (px), driven by HR. 0 = no pulse." },
-  { group: "Nodes", key: "haloPulse", label: "Halo pulse", min: 0, max: 24, step: 0.5,
-    tip: "How much the halo grows on each heartbeat (px), independent of the core. 0 = steady halo." },
+    tip: "Opacity of the halo (multiplied by the node's own fade-in). The heartbeat pulse is in the “Node Reacts to HR” event (scale + halo reactions)." },
 
   { group: "Colors", key: "cohortGlowTexture", label: "Cohort glow PNG", type: "text", placeholder: "/assets/glow.png",
     emptyLabel: "generated", setLabel: "PNG", pick: { dir: "/assets", exts: ["png", "jpg", "jpeg", "webp", "svg", "gif"] },
@@ -751,16 +746,17 @@ export function createNodeGraph(app) {
       if (efx.colorMix > 0 && efx.colorTo != null) tint = lerpColor(tint, efx.colorTo, clamp01(efx.colorMix));
       const nodeAlpha = clamp01(n.alpha + efx.alpha);
       n.renderTint = tint; n.renderScale = cohortScale;
-      const beat = 0.5 + 0.5 * Math.cos(n.phase % (2 * Math.PI));
-      const r = CFG.baseR * cohortScale + CFG.beatPulse * beat;
+      // The heartbeat pulse lives entirely in the HR event: efx.scale pulses the core (folded into
+      // cohortScale above), efx.haloScale + n.smHalo pulse the halo. No intrinsic px pulse here.
+      const r = CFG.baseR * cohortScale;
       n.r = r;
       n.g.x = n.x; n.g.y = n.y; n.g.alpha = nodeAlpha;
       n.core.tint = tint; n.halo.tint = tint;
       n.core.width = n.core.height = 2 * r;                        // sprite sized to the core diameter
       n.halo.visible = CFG.haloOn;
-      // halo uses the pre-reaction (core) scale so it's independent of the core; its own pulse comes
-      // from the "halo" property reaction (efx.haloScale) plus the intrinsic haloPulse px.
-      if (CFG.haloOn) { const hr = CFG.baseR * baseCohortScale * CFG.haloScale * (1 + efx.haloScale + n.smHalo) + CFG.haloPulse * beat; n.halo.width = n.halo.height = 2 * hr; n.halo.alpha = CFG.haloAlpha; }
+      // halo uses the pre-reaction (core) scale so it's independent of the core; its pulse comes
+      // from the "halo" HR property reaction (efx.haloScale + n.smHalo).
+      if (CFG.haloOn) { const hr = CFG.baseR * baseCohortScale * CFG.haloScale * (1 + efx.haloScale + n.smHalo); n.halo.width = n.halo.height = 2 * hr; n.halo.alpha = CFG.haloAlpha; }
       n.label.x = n.x; n.label.y = n.y + CFG.baseR * cohortScale + 7; n.label.alpha = nodeAlpha;
       // White while solo (over black); dark once in a cohort but wrapped in a cohort-color
       // outer glow so the dark text stays legible over the bright center AND the black edges.
@@ -846,6 +842,11 @@ export function createNodeGraph(app) {
   function setState(state) {
     if (!state) return;
     if (state.params) Object.assign(CFG, JSON.parse(JSON.stringify(state.params)));
+    // self-heal: add any catalog event (e.g. "hr" — which now drives the heartbeat pulse) missing
+    // from a preset saved before that event existed, with its default reactions.
+    const evDefs = defaultEvents();
+    if (!Array.isArray(CFG.events)) CFG.events = evDefs;
+    else for (const d of evDefs) if (!CFG.events.some((e) => e.id === d.id)) CFG.events.push(d);
     field.setSystems(CFG.particleSystems); // rebuild emitters for the loaded systems
     applyTextures();                        // reload node core/halo + edge textures
     fstack.sig = ""; eventFX.clear(); filterSig = ""; // force the composed filter stack to rebuild
