@@ -1,28 +1,28 @@
 {
-  "id": "node-chart-high-energy",
-  "label": "Node Chart - high energy",
+  "id": "temp",
+  "label": "temp",
   "renderer": "node-graph",
   "version": 1,
   "params": {
     "layout": "free",
-    "layoutPull": 0.7,
-    "layoutRingR": 0.4,
+    "layoutPull": 1,
+    "layoutRingR": 0.48,
     "layoutXVar": "hr",
     "layoutYVar": "hrv",
     "layoutColX": "spread",
     "layoutColY": "stack",
     "drift": 16,
     "driftTurn": 4,
-    "center": 0.12,
-    "gravityK": 5.6,
-    "minDist": 0.155,
-    "collideK": 60,
-    "crossDist": 0.28,
-    "sepK": 6,
-    "drag": 0.8,
-    "maxSpeed": 1.5,
-    "tGravity": 0.2,
-    "tMaster": 0,
+    "center": 0.19,
+    "gravityK": 2.7,
+    "minDist": 0.09,
+    "collideK": 19,
+    "crossDist": 0.29,
+    "sepK": 2.4,
+    "drag": 8,
+    "maxSpeed": 0.25,
+    "tGravity": 1.9,
+    "tMaster": 4.4,
     "tFade": 0.2,
     "tScale": 0,
     "gravRamp": 1,
@@ -33,19 +33,19 @@
     "edgeMaxW": 5.5,
     "edgeGrow": 16,
     "edgeStyle": "png",
-    "edgeTexture": "/assets/beam02.png",
-    "edgePngWidth": 52,
+    "edgeTexture": "/assets/beam_straight_crisp01.png",
+    "edgePngWidth": 60,
     "linkMin": 1,
-    "linkMax": 1.5,
-    "linkFade": 0.7,
-    "linkPull": 1.5,
+    "linkMax": 4,
+    "linkFade": 0.6,
+    "linkPull": 0.8,
     "nodeTint": "identity",
     "coreMode": "single",
-    "coreTexture": "/assets/node.png",
+    "coreTexture": "/assets/circile_crisp_01.png",
     "coreFolder": "",
-    "haloTexture": "/assets/glow.png",
-    "haloScale": 2.7,
-    "haloAlpha": 1,
+    "haloTexture": "/assets/circile_crisp_01.png",
+    "haloScale": 1.5,
+    "haloAlpha": 0,
     "haloOn": true,
     "particleSystems": {
       "aura": {
@@ -134,16 +134,16 @@
         "type": "hit",
         "color": "cohort",
         "shape": "scatter",
-        "texture": "",
+        "texture": "/assets/circle_hollow_01.png",
         "rate": 8,
-        "count": 20,
+        "count": 1,
         "lifeMin": 0.5,
-        "lifeMax": 1.2,
-        "speedStart": 80,
-        "speedEnd": 15,
-        "scaleStart": 0.4,
-        "scaleEnd": 0.1,
-        "spawnR": 6,
+        "lifeMax": 2.6,
+        "speedStart": 30,
+        "speedEnd": 45,
+        "scaleStart": 0.15,
+        "scaleEnd": 0.36,
+        "spawnR": 0,
         "config": "/assets/emitters/emitter_singlecircle.json",
         "fromFolder": true
       }
@@ -154,10 +154,10 @@
         "label": "Node Activated",
         "reactions": [
           {
-            "type": "particle",
-            "ref": "aura",
+            "type": "property",
+            "ref": "",
             "location": "node",
-            "trigger": "continuous",
+            "trigger": "modulate",
             "active": false
           }
         ]
@@ -173,8 +173,8 @@
             "trigger": "modulate",
             "active": true,
             "params": {
-              "amount": 0.5,
-              "dur": 0.4,
+              "amount": 1,
+              "dur": 4.1,
               "onset": 0
             }
           },
@@ -219,11 +219,19 @@
         "label": "Beat (per heartbeat)",
         "reactions": [
           {
+            "type": "particle",
+            "ref": "emitter_singlecircle",
+            "location": "node",
+            "trigger": "hit",
+            "active": true
+          },
+          {
+            "active": true,
             "type": "property",
             "ref": "",
             "location": "node",
-            "trigger": "hit",
-            "active": false
+            "trigger": "modulate",
+            "curve": "cosine"
           }
         ]
       },
@@ -237,7 +245,7 @@
         "label": "Node Reacts to HR",
         "reactions": [
           {
-            "active": false,
+            "active": true,
             "type": "property",
             "ref": "scale",
             "location": "node",
@@ -250,7 +258,7 @@
             }
           },
           {
-            "active": false,
+            "active": true,
             "type": "property",
             "ref": "halo",
             "location": "node",
@@ -268,47 +276,67 @@
     "filters": [
       {
         "type": "outline",
+        "active": true,
+        "params": {
+          "thickness": 7,
+          "color": "#ffffff",
+          "alpha": 1
+        }
+      },
+      {
+        "type": "blur",
         "active": false,
         "params": {
-          "thickness": 5.5,
-          "color": "#ffffff",
-          "alpha": 0.75
+          "strength": 2,
+          "quality": 4
         }
       },
       {
         "type": "glow",
-        "active": false,
+        "active": true,
         "params": {
-          "outerStrength": 0.5,
-          "innerStrength": 0,
-          "color": "#ffa70f"
+          "outerStrength": 0,
+          "innerStrength": 4.5,
+          "color": "#ffffff"
         }
       },
       {
-        "type": "adjust",
-        "active": true,
+        "type": "bevel",
+        "active": false,
         "params": {
-          "brightness": 0.85,
-          "contrast": 1.35,
-          "saturation": 2,
-          "gamma": 1
+          "rotation": 155,
+          "thickness": 8,
+          "lightAlpha": 0,
+          "shadowAlpha": 1,
+          "lightColor": "#fbff00",
+          "shadowColor": "#a30000"
         }
       },
       {
         "type": "bloom",
         "active": true,
         "params": {
-          "bloomScale": 1.8,
-          "threshold": 0,
+          "bloomScale": 1.4,
+          "threshold": 0.98,
           "brightness": 1,
-          "blur": 12.5
+          "blur": 1.5
+        }
+      },
+      {
+        "type": "adjust",
+        "active": true,
+        "params": {
+          "brightness": 0.75,
+          "contrast": 2,
+          "saturation": 2,
+          "gamma": 1
         }
       },
       {
         "type": "rgbSplit",
-        "active": false,
+        "active": true,
         "params": {
-          "amount": 14
+          "amount": 20
         }
       },
       {
@@ -329,26 +357,6 @@
           "innerRadius": 110,
           "cx": 0.5,
           "cy": 0.5
-        }
-      },
-      {
-        "type": "bevel",
-        "active": false,
-        "params": {
-          "rotation": 45,
-          "thickness": 2,
-          "lightAlpha": 0.7,
-          "shadowAlpha": 0.7,
-          "lightColor": "#ffffff",
-          "shadowColor": "#000000"
-        }
-      },
-      {
-        "type": "blur",
-        "active": false,
-        "params": {
-          "strength": 4,
-          "quality": 4
         }
       },
       {
@@ -373,23 +381,23 @@
         }
       }
     ],
-    "cohortGlowTexture": "/assets/glow_01.png",
-    "cohortGlowSize": 0.8,
-    "cohortGlowAlpha": 1.25,
+    "cohortGlowTexture": "/assets/circile_crisp_01.png",
+    "cohortGlowSize": 0.95,
+    "cohortGlowAlpha": 0.1,
     "cohortGlowFade": 3.8,
-    "cohortGlowOnset": 3.7,
-    "cohortGlowTween": 6,
-    "cohortHueSep": 65,
+    "cohortGlowOnset": 4.3,
+    "cohortGlowTween": 12.5,
+    "cohortHueSep": 15,
     "bg": "#150a10",
     "labelSolo": "#ffffff",
     "labelCohort": "#0e0a10",
     "exitDur": 0.6,
-    "grace": 0.3,
-    "baseR": 18,
+    "grace": 0.75,
+    "baseR": 30,
     "layoutVar": "hr",
-    "layoutBins": 20,
-    "beatPulse": 3.5,
-    "haloPulse": 12,
+    "layoutBins": 40,
+    "beatPulse": 6,
+    "haloPulse": 0.5,
     "emitRate": 3,
     "joinBurst": 26,
     "bloomScale": 0.6,

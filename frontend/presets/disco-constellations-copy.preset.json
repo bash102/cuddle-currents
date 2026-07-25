@@ -1,6 +1,6 @@
 {
-  "id": "node-chart-high-energy",
-  "label": "Node Chart - high energy",
+  "id": "disco-constellations-copy",
+  "label": "Disco Constellations 2",
   "renderer": "node-graph",
   "version": 1,
   "params": {
@@ -13,39 +13,39 @@
     "layoutColY": "stack",
     "drift": 16,
     "driftTurn": 4,
-    "center": 0.12,
-    "gravityK": 5.6,
-    "minDist": 0.155,
+    "center": 0.2,
+    "gravityK": 1.5,
+    "minDist": 0.115,
     "collideK": 60,
-    "crossDist": 0.28,
-    "sepK": 6,
-    "drag": 0.8,
-    "maxSpeed": 1.5,
+    "crossDist": 0.17,
+    "sepK": 4.6,
+    "drag": 4.5,
+    "maxSpeed": 0.35,
     "tGravity": 0.2,
-    "tMaster": 0,
-    "tFade": 0.2,
-    "tScale": 0,
+    "tMaster": 0.2,
+    "tFade": 1.3,
+    "tScale": 2.2,
     "gravRamp": 1,
     "fadeRamp": 1,
     "scaleRamp": 1,
-    "scaleMax": 1.6,
+    "scaleMax": 1.35,
     "edgeMinW": 0.8,
     "edgeMaxW": 5.5,
     "edgeGrow": 16,
     "edgeStyle": "png",
-    "edgeTexture": "/assets/beam02.png",
-    "edgePngWidth": 52,
+    "edgeTexture": "/assets/beam.png",
+    "edgePngWidth": 6,
     "linkMin": 1,
-    "linkMax": 1.5,
-    "linkFade": 0.7,
-    "linkPull": 1.5,
+    "linkMax": 3.5,
+    "linkFade": 0.4,
+    "linkPull": 0.5,
     "nodeTint": "identity",
     "coreMode": "single",
     "coreTexture": "/assets/node.png",
     "coreFolder": "",
-    "haloTexture": "/assets/glow.png",
-    "haloScale": 2.7,
-    "haloAlpha": 1,
+    "haloTexture": "/assets/glow_01.png",
+    "haloScale": 1,
+    "haloAlpha": 0.46,
     "haloOn": true,
     "particleSystems": {
       "aura": {
@@ -177,14 +177,6 @@
               "dur": 0.4,
               "onset": 0
             }
-          },
-          {
-            "active": false,
-            "type": "particle",
-            "ref": "joinBurst",
-            "location": "cohort centroid",
-            "trigger": "hit",
-            "curve": "cosine"
           }
         ]
       },
@@ -222,8 +214,12 @@
             "type": "property",
             "ref": "",
             "location": "node",
-            "trigger": "hit",
-            "active": false
+            "trigger": "modulate",
+            "active": false,
+            "params": {
+              "amount": 0.35,
+              "dur": 1.15
+            }
           }
         ]
       },
@@ -237,7 +233,7 @@
         "label": "Node Reacts to HR",
         "reactions": [
           {
-            "active": false,
+            "active": true,
             "type": "property",
             "ref": "scale",
             "location": "node",
@@ -250,7 +246,7 @@
             }
           },
           {
-            "active": false,
+            "active": true,
             "type": "property",
             "ref": "halo",
             "location": "node",
@@ -268,40 +264,40 @@
     "filters": [
       {
         "type": "outline",
-        "active": false,
-        "params": {
-          "thickness": 5.5,
-          "color": "#ffffff",
-          "alpha": 0.75
-        }
-      },
-      {
-        "type": "glow",
-        "active": false,
-        "params": {
-          "outerStrength": 0.5,
-          "innerStrength": 0,
-          "color": "#ffa70f"
-        }
-      },
-      {
-        "type": "adjust",
         "active": true,
         "params": {
-          "brightness": 0.85,
-          "contrast": 1.35,
-          "saturation": 2,
-          "gamma": 1
+          "thickness": 8,
+          "color": "#000000",
+          "alpha": 1
         }
       },
       {
         "type": "bloom",
         "active": true,
         "params": {
-          "bloomScale": 1.8,
+          "bloomScale": 2.8,
           "threshold": 0,
-          "brightness": 1,
-          "blur": 12.5
+          "brightness": 0.75,
+          "blur": 3
+        }
+      },
+      {
+        "type": "glow",
+        "active": false,
+        "params": {
+          "outerStrength": 0,
+          "innerStrength": 3.5,
+          "color": "#ffffff"
+        }
+      },
+      {
+        "type": "adjust",
+        "active": false,
+        "params": {
+          "brightness": 0.75,
+          "contrast": 1.8,
+          "saturation": 2,
+          "gamma": 1
         }
       },
       {
@@ -375,26 +371,26 @@
     ],
     "cohortGlowTexture": "/assets/glow_01.png",
     "cohortGlowSize": 0.8,
-    "cohortGlowAlpha": 1.25,
-    "cohortGlowFade": 3.8,
-    "cohortGlowOnset": 3.7,
+    "cohortGlowAlpha": 0.7,
+    "cohortGlowFade": 1.3,
+    "cohortGlowOnset": 0.5,
     "cohortGlowTween": 6,
     "cohortHueSep": 65,
     "bg": "#150a10",
     "labelSolo": "#ffffff",
     "labelCohort": "#0e0a10",
-    "exitDur": 0.6,
+    "exitDur": 0.4,
     "grace": 0.3,
-    "baseR": 18,
+    "baseR": 8,
     "layoutVar": "hr",
     "layoutBins": 20,
     "beatPulse": 3.5,
     "haloPulse": 12,
-    "emitRate": 3,
+    "emitRate": 28,
     "joinBurst": 26,
-    "bloomScale": 0.6,
-    "bloomThreshold": 0.5,
-    "bloomBrightness": 0.8,
-    "bloomBlur": 10
+    "bloomScale": 1.1,
+    "bloomThreshold": 0.35,
+    "bloomBrightness": 1,
+    "bloomBlur": 7
   }
 }

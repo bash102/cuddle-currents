@@ -1,12 +1,12 @@
 {
-  "id": "node-chart-high-energy",
-  "label": "Node Chart - high energy",
+  "id": "node-graph",
+  "label": "Node Chart A",
   "renderer": "node-graph",
   "version": 1,
   "params": {
-    "layout": "free",
-    "layoutPull": 0.7,
-    "layoutRingR": 0.4,
+    "layout": "column",
+    "layoutPull": 1,
+    "layoutRingR": 0.48,
     "layoutXVar": "hr",
     "layoutYVar": "hrv",
     "layoutColX": "spread",
@@ -14,12 +14,12 @@
     "drift": 16,
     "driftTurn": 4,
     "center": 0.12,
-    "gravityK": 5.6,
-    "minDist": 0.155,
+    "gravityK": 5.3,
+    "minDist": 0.115,
     "collideK": 60,
-    "crossDist": 0.28,
+    "crossDist": 0.32,
     "sepK": 6,
-    "drag": 0.8,
+    "drag": 8,
     "maxSpeed": 1.5,
     "tGravity": 0.2,
     "tMaster": 0,
@@ -31,7 +31,7 @@
     "scaleMax": 1.6,
     "edgeMinW": 0.8,
     "edgeMaxW": 5.5,
-    "edgeGrow": 16,
+    "edgeGrow": 8.5,
     "edgeStyle": "png",
     "edgeTexture": "/assets/beam02.png",
     "edgePngWidth": 52,
@@ -177,14 +177,6 @@
               "dur": 0.4,
               "onset": 0
             }
-          },
-          {
-            "active": false,
-            "type": "particle",
-            "ref": "joinBurst",
-            "location": "cohort centroid",
-            "trigger": "hit",
-            "curve": "cosine"
           }
         ]
       },
@@ -243,7 +235,7 @@
             "location": "node",
             "trigger": "continuous",
             "source": "beat",
-            "curve": "cosine",
+            "curve": "bounce",
             "params": {
               "amount": 0.28,
               "rate": 1
@@ -276,25 +268,6 @@
         }
       },
       {
-        "type": "glow",
-        "active": false,
-        "params": {
-          "outerStrength": 0.5,
-          "innerStrength": 0,
-          "color": "#ffa70f"
-        }
-      },
-      {
-        "type": "adjust",
-        "active": true,
-        "params": {
-          "brightness": 0.85,
-          "contrast": 1.35,
-          "saturation": 2,
-          "gamma": 1
-        }
-      },
-      {
         "type": "bloom",
         "active": true,
         "params": {
@@ -302,6 +275,25 @@
           "threshold": 0,
           "brightness": 1,
           "blur": 12.5
+        }
+      },
+      {
+        "type": "glow",
+        "active": false,
+        "params": {
+          "outerStrength": 0,
+          "innerStrength": 3.5,
+          "color": "#ffffff"
+        }
+      },
+      {
+        "type": "adjust",
+        "active": false,
+        "params": {
+          "brightness": 0.75,
+          "contrast": 1.8,
+          "saturation": 2,
+          "gamma": 1
         }
       },
       {
@@ -375,7 +367,7 @@
     ],
     "cohortGlowTexture": "/assets/glow_01.png",
     "cohortGlowSize": 0.8,
-    "cohortGlowAlpha": 1.25,
+    "cohortGlowAlpha": 2.35,
     "cohortGlowFade": 3.8,
     "cohortGlowOnset": 3.7,
     "cohortGlowTween": 6,
@@ -385,16 +377,16 @@
     "labelCohort": "#0e0a10",
     "exitDur": 0.6,
     "grace": 0.3,
-    "baseR": 18,
+    "baseR": 24,
     "layoutVar": "hr",
     "layoutBins": 20,
     "beatPulse": 3.5,
     "haloPulse": 12,
-    "emitRate": 3,
+    "emitRate": 28,
     "joinBurst": 26,
-    "bloomScale": 0.6,
-    "bloomThreshold": 0.5,
-    "bloomBrightness": 0.8,
-    "bloomBlur": 10
+    "bloomScale": 1.1,
+    "bloomThreshold": 0.35,
+    "bloomBrightness": 1,
+    "bloomBlur": 7
   }
 }

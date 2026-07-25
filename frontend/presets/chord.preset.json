@@ -1,0 +1,126 @@
+{
+  "id": "chord",
+  "label": "Chord Graph",
+  "renderer": "chord",
+  "version": 1,
+  "params": {
+    "ringR": 0.38,
+    "nodeR": 16,
+    "spin": 0.03,
+    "beatPulse": 3,
+    "chordThresh": 0.35,
+    "chordWidth": 4.5,
+    "chordAlpha": 0.55,
+    "chordCurve": 0.45,
+    "filters": [
+      {
+        "type": "bloom",
+        "active": true,
+        "params": {
+          "bloomScale": 1.8,
+          "threshold": 0.35,
+          "brightness": 1,
+          "blur": 7
+        }
+      },
+      {
+        "type": "glow",
+        "active": false,
+        "params": {
+          "outerStrength": 4,
+          "innerStrength": 0,
+          "color": "#ffffff"
+        }
+      },
+      {
+        "type": "outline",
+        "active": false,
+        "params": {
+          "thickness": 2,
+          "color": "#ffffff",
+          "alpha": 1
+        }
+      },
+      {
+        "type": "bevel",
+        "active": false,
+        "params": {
+          "rotation": 45,
+          "thickness": 2,
+          "lightAlpha": 0.7,
+          "shadowAlpha": 0.7,
+          "lightColor": "#ffffff",
+          "shadowColor": "#000000"
+        }
+      },
+      {
+        "type": "adjust",
+        "active": false,
+        "params": {
+          "brightness": 1,
+          "contrast": 1,
+          "saturation": 1,
+          "gamma": 1
+        }
+      },
+      {
+        "type": "rgbSplit",
+        "active": false,
+        "params": {
+          "amount": 4
+        }
+      },
+      {
+        "type": "blur",
+        "active": false,
+        "params": {
+          "strength": 4,
+          "quality": 4
+        }
+      },
+      {
+        "type": "bulgePinch",
+        "active": false,
+        "params": {
+          "radius": 360,
+          "strength": -0.3,
+          "cx": 0.5,
+          "cy": 0.5
+        }
+      },
+      {
+        "type": "zoomBlur",
+        "active": false,
+        "params": {
+          "strength": 0.1,
+          "innerRadius": 400,
+          "cx": 0.5,
+          "cy": 0.5
+        }
+      },
+      {
+        "type": "twist",
+        "active": false,
+        "params": {
+          "radius": 370,
+          "angle": 1,
+          "cx": 0.5,
+          "cy": 0.5
+        }
+      },
+      {
+        "type": "shockwave",
+        "active": false,
+        "params": {
+          "amplitude": 30,
+          "wavelength": 160,
+          "brightness": 1.1,
+          "cx": 0.5,
+          "cy": 0.5
+        }
+      }
+    ],
+    "bg": "#0b0a12",
+    "labelColor": "#e8e0f0"
+  }
+}

@@ -1,28 +1,28 @@
 {
-  "id": "node-chart-high-energy",
-  "label": "Node Chart - high energy",
+  "id": "test-custom-pngs",
+  "label": "test custom PNGs",
   "renderer": "node-graph",
   "version": 1,
   "params": {
     "layout": "free",
-    "layoutPull": 0.7,
-    "layoutRingR": 0.4,
+    "layoutPull": 1,
+    "layoutRingR": 0.48,
     "layoutXVar": "hr",
     "layoutYVar": "hrv",
     "layoutColX": "spread",
     "layoutColY": "stack",
     "drift": 16,
     "driftTurn": 4,
-    "center": 0.12,
-    "gravityK": 5.6,
-    "minDist": 0.155,
-    "collideK": 60,
-    "crossDist": 0.28,
-    "sepK": 6,
-    "drag": 0.8,
-    "maxSpeed": 1.5,
-    "tGravity": 0.2,
-    "tMaster": 0,
+    "center": 0.19,
+    "gravityK": 4.6,
+    "minDist": 0.09,
+    "collideK": 42,
+    "crossDist": 0.34,
+    "sepK": 4.7,
+    "drag": 7.5,
+    "maxSpeed": 0.3,
+    "tGravity": 1.9,
+    "tMaster": 4.4,
     "tFade": 0.2,
     "tScale": 0,
     "gravRamp": 1,
@@ -31,21 +31,21 @@
     "scaleMax": 1.6,
     "edgeMinW": 0.8,
     "edgeMaxW": 5.5,
-    "edgeGrow": 16,
+    "edgeGrow": 11,
     "edgeStyle": "png",
-    "edgeTexture": "/assets/beam02.png",
-    "edgePngWidth": 52,
+    "edgeTexture": "/assets/beam_straight_crisp01.png",
+    "edgePngWidth": 60,
     "linkMin": 1,
-    "linkMax": 1.5,
-    "linkFade": 0.7,
-    "linkPull": 1.5,
-    "nodeTint": "identity",
-    "coreMode": "single",
-    "coreTexture": "/assets/node.png",
-    "coreFolder": "",
-    "haloTexture": "/assets/glow.png",
-    "haloScale": 2.7,
-    "haloAlpha": 1,
+    "linkMax": 2.5,
+    "linkFade": 0.85,
+    "linkPull": 0.8,
+    "nodeTint": "cohort",
+    "coreMode": "group",
+    "coreTexture": "/assets/circile_crisp_01.png",
+    "coreFolder": "/assets/unique_icons01/",
+    "haloTexture": "/assets/circile_crisp_01.png",
+    "haloScale": 1.4,
+    "haloAlpha": 0.26,
     "haloOn": true,
     "particleSystems": {
       "aura": {
@@ -134,16 +134,16 @@
         "type": "hit",
         "color": "cohort",
         "shape": "scatter",
-        "texture": "",
+        "texture": "/assets/circle_hollow_01.png",
         "rate": 8,
-        "count": 20,
+        "count": 1,
         "lifeMin": 0.5,
-        "lifeMax": 1.2,
-        "speedStart": 80,
-        "speedEnd": 15,
-        "scaleStart": 0.4,
-        "scaleEnd": 0.1,
-        "spawnR": 6,
+        "lifeMax": 2.6,
+        "speedStart": 30,
+        "speedEnd": 45,
+        "scaleStart": 0.15,
+        "scaleEnd": 0.36,
+        "spawnR": 0,
         "config": "/assets/emitters/emitter_singlecircle.json",
         "fromFolder": true
       }
@@ -154,11 +154,16 @@
         "label": "Node Activated",
         "reactions": [
           {
-            "type": "particle",
-            "ref": "aura",
+            "type": "property",
+            "ref": "color",
             "location": "node",
-            "trigger": "continuous",
-            "active": false
+            "trigger": "modulate",
+            "active": false,
+            "params": {
+              "amount": 0,
+              "onset": 0,
+              "dur": 1
+            }
           }
         ]
       },
@@ -173,16 +178,16 @@
             "trigger": "modulate",
             "active": true,
             "params": {
-              "amount": 0.5,
-              "dur": 0.4,
+              "amount": 1,
+              "dur": 0.6,
               "onset": 0
             }
           },
           {
-            "active": false,
+            "active": true,
             "type": "particle",
-            "ref": "joinBurst",
-            "location": "cohort centroid",
+            "ref": "emitter_singlecircle",
+            "location": "node",
             "trigger": "hit",
             "curve": "cosine"
           }
@@ -219,46 +224,51 @@
         "label": "Beat (per heartbeat)",
         "reactions": [
           {
-            "type": "property",
-            "ref": "",
+            "type": "filter",
+            "ref": "blur",
             "location": "node",
             "trigger": "hit",
-            "active": false
+            "active": false,
+            "params": {
+              "thickness": 0.5,
+              "color": "#ffffff",
+              "alpha": 1,
+              "dur": 0.2,
+              "strength": 0,
+              "quality": 4
+            }
           }
         ]
       },
       {
         "id": "removed",
         "label": "Node Removed",
-        "reactions": []
+        "reactions": [
+          {
+            "active": false,
+            "type": "particle",
+            "ref": "",
+            "location": "node",
+            "trigger": "hit",
+            "curve": "cosine"
+          }
+        ]
       },
       {
         "id": "hr",
         "label": "Node Reacts to HR",
         "reactions": [
           {
-            "active": false,
+            "active": true,
             "type": "property",
             "ref": "scale",
             "location": "node",
-            "trigger": "continuous",
-            "source": "beat",
+            "trigger": "hit",
             "curve": "cosine",
             "params": {
-              "amount": 0.28,
-              "rate": 1
-            }
-          },
-          {
-            "active": false,
-            "type": "property",
-            "ref": "halo",
-            "location": "node",
-            "trigger": "continuous",
-            "source": "beat",
-            "curve": "cosine",
-            "params": {
-              "amount": 0.5,
+              "amount": 0.4,
+              "dur": 0.25,
+              "onset": 0,
               "rate": 1
             }
           }
@@ -267,48 +277,68 @@
     ],
     "filters": [
       {
+        "type": "bevel",
+        "active": true,
+        "params": {
+          "rotation": 155,
+          "thickness": 3.5,
+          "lightAlpha": 0.45,
+          "shadowAlpha": 1,
+          "lightColor": "#ececcb",
+          "shadowColor": "#290000"
+        }
+      },
+      {
         "type": "outline",
+        "active": true,
+        "params": {
+          "thickness": 7,
+          "color": "#ffffff",
+          "alpha": 1
+        }
+      },
+      {
+        "type": "blur",
         "active": false,
         "params": {
-          "thickness": 5.5,
-          "color": "#ffffff",
-          "alpha": 0.75
+          "strength": 2,
+          "quality": 4
         }
       },
       {
         "type": "glow",
         "active": false,
         "params": {
-          "outerStrength": 0.5,
-          "innerStrength": 0,
-          "color": "#ffa70f"
-        }
-      },
-      {
-        "type": "adjust",
-        "active": true,
-        "params": {
-          "brightness": 0.85,
-          "contrast": 1.35,
-          "saturation": 2,
-          "gamma": 1
+          "outerStrength": 0,
+          "innerStrength": 4.5,
+          "color": "#ffffff"
         }
       },
       {
         "type": "bloom",
         "active": true,
         "params": {
-          "bloomScale": 1.8,
-          "threshold": 0,
+          "bloomScale": 1.05,
+          "threshold": 0.34,
           "brightness": 1,
-          "blur": 12.5
+          "blur": 6
+        }
+      },
+      {
+        "type": "adjust",
+        "active": true,
+        "params": {
+          "brightness": 0.9,
+          "contrast": 1,
+          "saturation": 2,
+          "gamma": 1
         }
       },
       {
         "type": "rgbSplit",
         "active": false,
         "params": {
-          "amount": 14
+          "amount": 20
         }
       },
       {
@@ -329,26 +359,6 @@
           "innerRadius": 110,
           "cx": 0.5,
           "cy": 0.5
-        }
-      },
-      {
-        "type": "bevel",
-        "active": false,
-        "params": {
-          "rotation": 45,
-          "thickness": 2,
-          "lightAlpha": 0.7,
-          "shadowAlpha": 0.7,
-          "lightColor": "#ffffff",
-          "shadowColor": "#000000"
-        }
-      },
-      {
-        "type": "blur",
-        "active": false,
-        "params": {
-          "strength": 4,
-          "quality": 4
         }
       },
       {
@@ -373,23 +383,23 @@
         }
       }
     ],
-    "cohortGlowTexture": "/assets/glow_01.png",
-    "cohortGlowSize": 0.8,
-    "cohortGlowAlpha": 1.25,
+    "cohortGlowTexture": "/assets/circile_crisp_01.png",
+    "cohortGlowSize": 0.9,
+    "cohortGlowAlpha": 0.1,
     "cohortGlowFade": 3.8,
     "cohortGlowOnset": 3.7,
-    "cohortGlowTween": 6,
-    "cohortHueSep": 65,
+    "cohortGlowTween": 12.5,
+    "cohortHueSep": 15,
     "bg": "#150a10",
     "labelSolo": "#ffffff",
     "labelCohort": "#0e0a10",
     "exitDur": 0.6,
-    "grace": 0.3,
-    "baseR": 18,
+    "grace": 0.75,
+    "baseR": 30,
     "layoutVar": "hr",
-    "layoutBins": 20,
-    "beatPulse": 3.5,
-    "haloPulse": 12,
+    "layoutBins": 40,
+    "beatPulse": 2.5,
+    "haloPulse": 0,
     "emitRate": 3,
     "joinBurst": 26,
     "bloomScale": 0.6,

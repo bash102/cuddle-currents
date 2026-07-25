@@ -1,6 +1,6 @@
 {
-  "id": "node-chart-high-energy",
-  "label": "Node Chart - high energy",
+  "id": "largeglowsnodechart",
+  "label": "LargeGlowsNodeChart",
   "renderer": "node-graph",
   "version": 1,
   "params": {
@@ -13,14 +13,14 @@
     "layoutColY": "stack",
     "drift": 16,
     "driftTurn": 4,
-    "center": 0.12,
-    "gravityK": 5.6,
-    "minDist": 0.155,
+    "center": 0.04,
+    "gravityK": 1.2,
+    "minDist": 0.115,
     "collideK": 60,
-    "crossDist": 0.28,
+    "crossDist": 0.21,
     "sepK": 6,
-    "drag": 0.8,
-    "maxSpeed": 1.5,
+    "drag": 8,
+    "maxSpeed": 0.7,
     "tGravity": 0.2,
     "tMaster": 0,
     "tFade": 0.2,
@@ -41,7 +41,7 @@
     "linkPull": 1.5,
     "nodeTint": "identity",
     "coreMode": "single",
-    "coreTexture": "/assets/node.png",
+    "coreTexture": "/assets/circile_crisp_01.png",
     "coreFolder": "",
     "haloTexture": "/assets/glow.png",
     "haloScale": 2.7,
@@ -179,12 +179,20 @@
             }
           },
           {
-            "active": false,
-            "type": "particle",
-            "ref": "joinBurst",
+            "active": true,
+            "type": "filter",
+            "ref": "shockwave",
             "location": "cohort centroid",
             "trigger": "hit",
-            "curve": "cosine"
+            "curve": "cosine",
+            "params": {
+              "amplitude": 11,
+              "wavelength": 110,
+              "brightness": 2,
+              "cx": 0.5,
+              "cy": 0.5,
+              "dur": 2.5
+            }
           }
         ]
       },
@@ -237,7 +245,7 @@
         "label": "Node Reacts to HR",
         "reactions": [
           {
-            "active": false,
+            "active": true,
             "type": "property",
             "ref": "scale",
             "location": "node",
@@ -250,7 +258,7 @@
             }
           },
           {
-            "active": false,
+            "active": true,
             "type": "property",
             "ref": "halo",
             "location": "node",
@@ -268,7 +276,7 @@
     "filters": [
       {
         "type": "outline",
-        "active": false,
+        "active": true,
         "params": {
           "thickness": 5.5,
           "color": "#ffffff",
@@ -276,37 +284,37 @@
         }
       },
       {
-        "type": "glow",
-        "active": false,
-        "params": {
-          "outerStrength": 0.5,
-          "innerStrength": 0,
-          "color": "#ffa70f"
-        }
-      },
-      {
-        "type": "adjust",
-        "active": true,
-        "params": {
-          "brightness": 0.85,
-          "contrast": 1.35,
-          "saturation": 2,
-          "gamma": 1
-        }
-      },
-      {
         "type": "bloom",
         "active": true,
         "params": {
-          "bloomScale": 1.8,
+          "bloomScale": 0.5,
           "threshold": 0,
           "brightness": 1,
           "blur": 12.5
         }
       },
       {
+        "type": "glow",
+        "active": true,
+        "params": {
+          "outerStrength": 0,
+          "innerStrength": 3.5,
+          "color": "#ffffff"
+        }
+      },
+      {
+        "type": "adjust",
+        "active": true,
+        "params": {
+          "brightness": 0.75,
+          "contrast": 1.8,
+          "saturation": 2,
+          "gamma": 1
+        }
+      },
+      {
         "type": "rgbSplit",
-        "active": false,
+        "active": true,
         "params": {
           "amount": 14
         }
@@ -373,9 +381,9 @@
         }
       }
     ],
-    "cohortGlowTexture": "/assets/glow_01.png",
+    "cohortGlowTexture": "/assets/circile_crisp_01.png",
     "cohortGlowSize": 0.8,
-    "cohortGlowAlpha": 1.25,
+    "cohortGlowAlpha": 2.35,
     "cohortGlowFade": 3.8,
     "cohortGlowOnset": 3.7,
     "cohortGlowTween": 6,
@@ -390,11 +398,11 @@
     "layoutBins": 20,
     "beatPulse": 3.5,
     "haloPulse": 12,
-    "emitRate": 3,
+    "emitRate": 28,
     "joinBurst": 26,
-    "bloomScale": 0.6,
-    "bloomThreshold": 0.5,
-    "bloomBrightness": 0.8,
-    "bloomBlur": 10
+    "bloomScale": 1.1,
+    "bloomThreshold": 0.35,
+    "bloomBrightness": 1,
+    "bloomBlur": 7
   }
 }
