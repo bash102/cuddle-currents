@@ -526,7 +526,7 @@ export async function startPixiApp({ mount }) {
     if (!current?.getState) return;
     commit(); // flush any in-progress edit first
     const e = libEntry(currentId);
-    const data = { ...current.getState(), renderer: e?.renderer, label: e?.label || currentId };
+    const data = { id: currentId, renderer: e?.renderer, label: e?.label || currentId, ...current.getState() };
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a"); a.href = url;

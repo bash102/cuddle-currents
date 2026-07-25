@@ -66,7 +66,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
 if __name__ == "__main__":
     os.chdir(ROOT)
     os.makedirs(PRESETS_DIR, exist_ok=True)
-    httpd = http.server.ThreadingHTTPServer(("", PORT), Handler)
+    httpd = http.server.ThreadingHTTPServer(("127.0.0.1", PORT), Handler)  # localhost only (has a write endpoint)
     print(f"viz harness on http://127.0.0.1:{PORT}/dev.html   (presets -> {PRESETS_DIR})")
     try:
         httpd.serve_forever()
