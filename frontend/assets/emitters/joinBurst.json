@@ -1,0 +1,103 @@
+{
+  "lifetime": {
+    "min": 0.5,
+    "max": 0.95
+  },
+  "frequency": 0.001,
+  "spawnChance": 1,
+  "particlesPerWave": 26,
+  "emitterLifetime": 0.02,
+  "maxParticles": 240,
+  "pos": {
+    "x": 0,
+    "y": 0
+  },
+  "addAtBack": false,
+  "behaviors": [
+    {
+      "type": "alpha",
+      "config": {
+        "alpha": {
+          "list": [
+            {
+              "time": 0,
+              "value": 0.9
+            },
+            {
+              "time": 1,
+              "value": 0
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": "scale",
+      "config": {
+        "scale": {
+          "list": [
+            {
+              "time": 0,
+              "value": 0.55
+            },
+            {
+              "time": 1,
+              "value": 0.1
+            }
+          ]
+        },
+        "minMult": 0.7
+      }
+    },
+    {
+      "type": "moveSpeed",
+      "config": {
+        "speed": {
+          "list": [
+            {
+              "time": 0,
+              "value": 150
+            },
+            {
+              "time": 1,
+              "value": 20
+            }
+          ]
+        },
+        "minMult": 0.6
+      }
+    },
+    {
+      "type": "rotationStatic",
+      "config": {
+        "min": 0,
+        "max": 360
+      }
+    },
+    {
+      "type": "spawnShape",
+      "config": {
+        "type": "torus",
+        "data": {
+          "x": 0,
+          "y": 0,
+          "radius": 4,
+          "innerRadius": 0,
+          "affectRotation": false
+        }
+      }
+    },
+    {
+      "type": "colorStatic",
+      "config": {
+        "color": "ffffff"
+      }
+    },
+    {
+      "type": "textureSingle",
+      "config": {
+        "texture": null
+      }
+    }
+  ]
+}

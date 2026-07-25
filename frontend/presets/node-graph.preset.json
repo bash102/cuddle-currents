@@ -1,0 +1,392 @@
+{
+  "id": "node-graph",
+  "label": "Node Chart A",
+  "renderer": "node-graph",
+  "version": 1,
+  "params": {
+    "layout": "column",
+    "layoutPull": 1,
+    "layoutRingR": 0.48,
+    "layoutXVar": "hr",
+    "layoutYVar": "hrv",
+    "layoutColX": "spread",
+    "layoutColY": "stack",
+    "drift": 16,
+    "driftTurn": 4,
+    "center": 0.12,
+    "gravityK": 5.3,
+    "minDist": 0.115,
+    "collideK": 60,
+    "crossDist": 0.32,
+    "sepK": 6,
+    "drag": 8,
+    "maxSpeed": 1.5,
+    "tGravity": 0.2,
+    "tMaster": 0,
+    "tFade": 0.2,
+    "tScale": 0,
+    "gravRamp": 1,
+    "fadeRamp": 1,
+    "scaleRamp": 1,
+    "scaleMax": 1.6,
+    "edgeMinW": 0.8,
+    "edgeMaxW": 5.5,
+    "edgeGrow": 8.5,
+    "edgeStyle": "png",
+    "edgeTexture": "/assets/beam02.png",
+    "edgePngWidth": 52,
+    "linkMin": 1,
+    "linkMax": 1.5,
+    "linkFade": 0.7,
+    "linkPull": 1.5,
+    "nodeTint": "identity",
+    "coreMode": "single",
+    "coreTexture": "/assets/node.png",
+    "coreFolder": "",
+    "haloTexture": "/assets/glow.png",
+    "haloScale": 2.7,
+    "haloAlpha": 1,
+    "haloOn": true,
+    "particleSystems": {
+      "aura": {
+        "label": "Aura",
+        "type": "continuous",
+        "color": "node",
+        "rate": 30,
+        "lifeMin": 0.9,
+        "lifeMax": 1.7,
+        "speedStart": 245,
+        "speedEnd": 70,
+        "scaleStart": 0.45,
+        "scaleEnd": 0.22,
+        "spawnR": 8
+      },
+      "joinBurst": {
+        "label": "Join Burst",
+        "type": "hit",
+        "color": "cohort",
+        "count": 40,
+        "lifeMin": 0.5,
+        "lifeMax": 2.5,
+        "speedStart": 65,
+        "speedEnd": 20,
+        "scaleStart": 0.55,
+        "scaleEnd": 0.1,
+        "spawnR": 35,
+        "shape": "ring",
+        "texture": "/assets/glow.png"
+      },
+      "Sparkle": {
+        "label": "Sparkle",
+        "type": "hit",
+        "color": "node",
+        "shape": "scatter",
+        "texture": "",
+        "rate": 8,
+        "count": 65,
+        "lifeMin": 0.5,
+        "lifeMax": 1.2,
+        "speedStart": 80,
+        "speedEnd": 15,
+        "scaleStart": 0.4,
+        "scaleEnd": 0.1,
+        "spawnR": 6,
+        "config": "/assets/emitters/shiney01.json"
+      },
+      "example": {
+        "label": "example",
+        "type": "continuous",
+        "color": "cohort",
+        "shape": "scatter",
+        "texture": "",
+        "rate": 8,
+        "count": 20,
+        "lifeMin": 0.5,
+        "lifeMax": 1.2,
+        "speedStart": 80,
+        "speedEnd": 15,
+        "scaleStart": 0.4,
+        "scaleEnd": 0.1,
+        "spawnR": 6,
+        "config": "/assets/emitters/example.json",
+        "fromFolder": true
+      },
+      "ringBurst": {
+        "label": "ringBurst",
+        "type": "hit",
+        "color": "cohort",
+        "shape": "scatter",
+        "texture": "",
+        "rate": 8,
+        "count": 20,
+        "lifeMin": 0.5,
+        "lifeMax": 1.2,
+        "speedStart": 80,
+        "speedEnd": 15,
+        "scaleStart": 0.4,
+        "scaleEnd": 0.1,
+        "spawnR": 6,
+        "config": "/assets/emitters/ringBurst.json",
+        "fromFolder": true
+      },
+      "emitter_singlecircle": {
+        "label": "emitter_singlecircle",
+        "type": "hit",
+        "color": "cohort",
+        "shape": "scatter",
+        "texture": "",
+        "rate": 8,
+        "count": 20,
+        "lifeMin": 0.5,
+        "lifeMax": 1.2,
+        "speedStart": 80,
+        "speedEnd": 15,
+        "scaleStart": 0.4,
+        "scaleEnd": 0.1,
+        "spawnR": 6,
+        "config": "/assets/emitters/emitter_singlecircle.json",
+        "fromFolder": true
+      }
+    },
+    "events": [
+      {
+        "id": "activated",
+        "label": "Node Activated",
+        "reactions": [
+          {
+            "type": "particle",
+            "ref": "aura",
+            "location": "node",
+            "trigger": "continuous",
+            "active": false
+          }
+        ]
+      },
+      {
+        "id": "joined",
+        "label": "Node Joins Cohort",
+        "reactions": [
+          {
+            "type": "property",
+            "ref": "color",
+            "location": "node",
+            "trigger": "modulate",
+            "active": true,
+            "params": {
+              "amount": 0.5,
+              "dur": 0.4,
+              "onset": 0
+            }
+          }
+        ]
+      },
+      {
+        "id": "left",
+        "label": "Node Leaves Cohort",
+        "reactions": [
+          {
+            "active": false,
+            "type": "particle",
+            "ref": "",
+            "location": "node",
+            "trigger": "hit"
+          }
+        ]
+      },
+      {
+        "id": "disconnected",
+        "label": "Node Disconnected",
+        "reactions": [
+          {
+            "active": false,
+            "type": "particle",
+            "ref": "",
+            "location": "node",
+            "trigger": "hit"
+          }
+        ]
+      },
+      {
+        "id": "beat",
+        "label": "Beat (per heartbeat)",
+        "reactions": [
+          {
+            "type": "property",
+            "ref": "",
+            "location": "node",
+            "trigger": "hit",
+            "active": false
+          }
+        ]
+      },
+      {
+        "id": "removed",
+        "label": "Node Removed",
+        "reactions": []
+      },
+      {
+        "id": "hr",
+        "label": "Node Reacts to HR",
+        "reactions": [
+          {
+            "active": false,
+            "type": "property",
+            "ref": "scale",
+            "location": "node",
+            "trigger": "continuous",
+            "source": "beat",
+            "curve": "bounce",
+            "params": {
+              "amount": 0.28,
+              "rate": 1
+            }
+          },
+          {
+            "active": false,
+            "type": "property",
+            "ref": "halo",
+            "location": "node",
+            "trigger": "continuous",
+            "source": "beat",
+            "curve": "cosine",
+            "params": {
+              "amount": 0.5,
+              "rate": 1
+            }
+          }
+        ]
+      }
+    ],
+    "filters": [
+      {
+        "type": "outline",
+        "active": false,
+        "params": {
+          "thickness": 5.5,
+          "color": "#ffffff",
+          "alpha": 0.75
+        }
+      },
+      {
+        "type": "bloom",
+        "active": true,
+        "params": {
+          "bloomScale": 1.8,
+          "threshold": 0,
+          "brightness": 1,
+          "blur": 12.5
+        }
+      },
+      {
+        "type": "glow",
+        "active": false,
+        "params": {
+          "outerStrength": 0,
+          "innerStrength": 3.5,
+          "color": "#ffffff"
+        }
+      },
+      {
+        "type": "adjust",
+        "active": false,
+        "params": {
+          "brightness": 0.75,
+          "contrast": 1.8,
+          "saturation": 2,
+          "gamma": 1
+        }
+      },
+      {
+        "type": "rgbSplit",
+        "active": false,
+        "params": {
+          "amount": 14
+        }
+      },
+      {
+        "type": "bulgePinch",
+        "active": false,
+        "params": {
+          "radius": 310,
+          "strength": 0.5,
+          "cx": 0.62,
+          "cy": 0.5
+        }
+      },
+      {
+        "type": "zoomBlur",
+        "active": false,
+        "params": {
+          "strength": 0.24,
+          "innerRadius": 110,
+          "cx": 0.5,
+          "cy": 0.5
+        }
+      },
+      {
+        "type": "bevel",
+        "active": false,
+        "params": {
+          "rotation": 45,
+          "thickness": 2,
+          "lightAlpha": 0.7,
+          "shadowAlpha": 0.7,
+          "lightColor": "#ffffff",
+          "shadowColor": "#000000"
+        }
+      },
+      {
+        "type": "blur",
+        "active": false,
+        "params": {
+          "strength": 4,
+          "quality": 4
+        }
+      },
+      {
+        "type": "twist",
+        "active": false,
+        "params": {
+          "radius": 200,
+          "angle": 4,
+          "cx": 0.5,
+          "cy": 0.5
+        }
+      },
+      {
+        "type": "shockwave",
+        "active": false,
+        "params": {
+          "amplitude": 30,
+          "wavelength": 160,
+          "brightness": 1.1,
+          "cx": 0.5,
+          "cy": 0.5
+        }
+      }
+    ],
+    "cohortGlowTexture": "/assets/glow_01.png",
+    "cohortGlowSize": 0.8,
+    "cohortGlowAlpha": 2.35,
+    "cohortGlowFade": 3.8,
+    "cohortGlowOnset": 3.7,
+    "cohortGlowTween": 6,
+    "cohortHueSep": 65,
+    "bg": "#150a10",
+    "labelSolo": "#ffffff",
+    "labelCohort": "#0e0a10",
+    "exitDur": 0.6,
+    "grace": 0.3,
+    "baseR": 24,
+    "layoutVar": "hr",
+    "layoutBins": 20,
+    "beatPulse": 3.5,
+    "haloPulse": 12,
+    "emitRate": 28,
+    "joinBurst": 26,
+    "bloomScale": 1.1,
+    "bloomThreshold": 0.35,
+    "bloomBrightness": 1,
+    "bloomBlur": 7
+  }
+}

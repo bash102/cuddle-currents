@@ -1,0 +1,634 @@
+// PixiJS bootstrap + preset switcher (style-vs-renderer).
+//
+// One WebGL Application, one canvas. A "preset" is a STYLE (settings) bound to a RENDERER
+// (engine). Presets live in a localStorage LIBRARY, seeded from registry.PRESETS: you
+// OPEN one from a dialog and SAVE your edits back into it (Save As makes a new one).
+// Edits also auto-commit on switch / page unload so nothing is lost. Every renderer reads
+// the same StateFrame from the store.
+
+import { Application } from "../../vendor/pixi.min.mjs";
+import { getFrame } from "../store.js";
+import { PRESETS, RENDERERS } from "../presets/registry.js";
+import { FILTERS, FILTER_ORDER } from "../presets/filters.js";
+import { SYSTEM_PARAMS, newParticleSystem, systemToConfig } from "../presets/particles.js";
+import { REACTION_TYPES, LOCATIONS, TRIGGERS, CURVES, SOURCES, EVENT_CATALOG, makeReaction } from "../presets/events.js";
+
+const CSS = `
+#preset-open { position: fixed; top: 14px; left: 14px; z-index: 20; font: 12px system-ui, sans-serif;
+  background: rgba(30,16,24,0.82); color: #f2e4de; border: 1px solid rgba(255,255,255,0.16);
+  border-radius: 7px; padding: 7px 12px; cursor: pointer; backdrop-filter: blur(6px); }
+#preset-open:hover { border-color: rgba(255,255,255,0.4); }
+#preset-open .cur { color: #e8663f; font-weight: 600; margin-left: 6px; }
+#preset-dialog { position: fixed; inset: 0; z-index: 30; display: none; background: rgba(0,0,0,0.45); }
+#preset-dialog.open { display: block; }
+#preset-dialog .box { position: absolute; top: 56px; left: 14px; width: 300px; max-height: 72vh; overflow-y: auto;
+  background: rgba(20,10,16,0.97); border: 1px solid rgba(255,255,255,0.14); border-radius: 10px;
+  padding: 12px; font: 12px system-ui, sans-serif; color: #f2e4de; backdrop-filter: blur(8px); }
+#preset-dialog h3 { margin: 0 0 10px; font-size: 10px; letter-spacing: .12em; text-transform: uppercase; color: #b89; }
+#preset-dialog .item { display: flex; align-items: center; gap: 6px; padding: 7px 8px; border-radius: 7px; cursor: pointer; }
+#preset-dialog .item:hover { background: rgba(255,255,255,0.06); }
+#preset-dialog .item.on { background: #e8663f; color: #150a10; font-weight: 600; }
+#preset-dialog .item .lbl { flex: 1; }
+#preset-dialog .item .ren { opacity: .5; font-size: 10px; }
+#preset-dialog .item .del { opacity: .5; padding: 0 4px; }
+#preset-dialog .item .del:hover { opacity: 1; color: #e0245e; }
+#preset-dialog .foot { display: flex; gap: 6px; margin-top: 10px; padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.08); }
+#preset-dialog .foot button { background: #2e1622; color: #f2e4de; border: 1px solid rgba(255,255,255,0.14);
+  border-radius: 6px; padding: 5px 9px; cursor: pointer; font: 11px system-ui; }
+#preset-dialog .foot button:hover { border-color: rgba(255,255,255,0.4); }
+#preset-ctrl { position: fixed; top: 56px; left: 14px; width: 232px; z-index: 20;
+  max-height: calc(100vh - 72px); overflow-y: auto;
+  background: rgba(20,10,16,0.86); border: 1px solid rgba(255,255,255,0.1); border-radius: 9px;
+  padding: 10px 12px; font: 11px system-ui, sans-serif; color: #f2e4de; backdrop-filter: blur(6px); }
+#preset-ctrl h3 { margin: 0 0 8px; font-size: 10px; letter-spacing: .1em; text-transform: uppercase; color: #b89; }
+#preset-ctrl .grp { margin: 11px 0 3px; font-size: 9px; letter-spacing: .12em; text-transform: uppercase;
+  color: #e8663f; border-top: 1px solid rgba(255,255,255,0.07); padding-top: 7px; }
+#preset-ctrl .grp:first-of-type { border-top: none; padding-top: 0; margin-top: 4px; }
+#preset-ctrl .r { display: flex; align-items: center; gap: 8px; margin: 4px 0; }
+#preset-ctrl label { flex: 0 0 70px; color: #c9b; cursor: help; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#preset-ctrl input[type=range] { flex: 1; min-width: 0; }
+#preset-ctrl input[type=color] { flex: 1; height: 18px; padding: 0; border: 1px solid rgba(255,255,255,0.14);
+  border-radius: 4px; background: none; cursor: pointer; }
+#preset-ctrl select { flex: 1; background: #241019; color: #f2e4de; border: 1px solid rgba(255,255,255,0.14);
+  border-radius: 5px; padding: 2px 3px; font: 11px system-ui; }
+#preset-ctrl input[type=checkbox] { margin: 0 auto 0 0; cursor: pointer; }
+#preset-ctrl .v { flex: 0 0 34px; text-align: right; font-variant-numeric: tabular-nums; color: #fff; }
+#preset-ctrl .fhdr { display: flex; align-items: center; gap: 6px; margin: 6px 0 2px; }
+#preset-ctrl .fhdr input[type=checkbox] { margin: 0; cursor: pointer; }
+#preset-ctrl .fhdr .fname { flex: 1; color: #f2e4de; font-weight: 600; }
+#preset-ctrl .fhdr .fname.off { color: #8a7580; font-weight: 400; }
+#preset-ctrl .fhdr .mv { cursor: pointer; opacity: .45; padding: 0 2px; font-size: 12px; user-select: none; }
+#preset-ctrl .fhdr .mv:hover { opacity: 1; }
+#preset-ctrl .fp { padding-left: 10px; border-left: 2px solid rgba(232,102,63,0.3); margin-left: 2px; }
+#preset-ctrl .fp label { flex: 0 0 60px; }
+#preset-ctrl .fhdr .ren { opacity: .5; font-size: 10px; }
+#preset-ctrl .fhdr .evname { cursor: help; }
+#preset-ctrl .fhdr .evinfo { flex: 0 0 auto; cursor: help; opacity: .5; font-size: 11px; }
+#preset-ctrl .fhdr .evinfo:hover { opacity: 1; }
+#preset-ctrl .fhdr .add { cursor: pointer; opacity: .55; font-size: 13px; padding: 0 2px; }
+#preset-ctrl .fhdr .add:hover { opacity: 1; }
+#preset-ctrl .rxn { margin: 3px 0 5px 8px; padding: 4px 6px; border-left: 2px solid rgba(255,255,255,0.12);
+  background: rgba(255,255,255,0.03); border-radius: 0 5px 5px 0; position: relative; }
+#preset-ctrl .rxn .rr { display: flex; align-items: center; gap: 6px; margin: 2px 0; }
+#preset-ctrl .rxn .rr span { flex: 0 0 30px; color: #a89; }
+#preset-ctrl .rxn .rr select { flex: 1; background: #241019; color: #f2e4de;
+  border: 1px solid rgba(255,255,255,0.14); border-radius: 4px; padding: 1px 3px; font: 10px system-ui; }
+#preset-ctrl .rxn .del { position: absolute; top: 3px; right: 4px; cursor: pointer; opacity: .5; font-size: 11px; }
+#preset-ctrl .rxn .del:hover { opacity: 1; color: #e0245e; }
+#preset-ctrl .rxn.off { opacity: .45; }
+#preset-ctrl .rxn-set { font-size: 9px; letter-spacing: .04em; text-transform: uppercase; color: #a89;
+  margin: 5px 0 2px; opacity: .7; }
+#preset-ctrl .rxn .actchk { flex: 0 0 auto; margin: 0; cursor: pointer; }
+#preset-ctrl .sbar { display: flex; gap: 6px; align-items: center; margin-top: 10px;
+  padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.08); flex-wrap: wrap; }
+#preset-ctrl .sbar button { background: #2e1622; color: #f2e4de; border: 1px solid rgba(255,255,255,0.14);
+  border-radius: 6px; padding: 4px 8px; cursor: pointer; font: 10px system-ui; }
+#preset-ctrl .sbar button:hover { border-color: rgba(255,255,255,0.4); }
+#preset-ctrl .sbar .note { color: #7cb; font-size: 10px; }
+#preset-ctrl .sbar.top { margin-top: 6px; margin-bottom: 4px; padding-top: 0; padding-bottom: 9px;
+  border-top: none; border-bottom: 1px solid rgba(255,255,255,0.1); }
+#preset-ctrl .grp .add { cursor: pointer; opacity: .7; font-size: 13px; margin-left: 5px;
+  text-transform: none; color: #f2e4de; user-select: none; }
+#preset-ctrl .grp .add:hover { opacity: 1; }
+#preset-ctrl .fhdr .fname.ren { cursor: text; }
+#preset-ctrl .fhdr .fname.ren:hover { text-decoration: underline dotted; }
+#preset-ctrl .fhdr .del:hover { color: #e0245e; }
+#preset-ctrl .fhdr .tsel { flex: 0 0 auto; width: auto; font-size: 10px; padding: 1px 4px; }
+#preset-ctrl .edlink { flex: 0 0 auto; cursor: pointer; font-size: 9px; color: #7ad7c7;
+  border: 1px solid rgba(122,215,199,0.4); border-radius: 8px; padding: 1px 6px; white-space: nowrap; }
+#preset-ctrl .edlink:hover { background: rgba(122,215,199,0.12); }
+#preset-ctrl .edlink.exp { color: #e0a96d; border-color: rgba(224,169,109,0.4); }
+#preset-ctrl .edlink.exp:hover { background: rgba(224,169,109,0.12); }
+#preset-ctrl .fhdr .caret { flex: 0 0 auto; cursor: pointer; color: #a89; font-size: 10px; width: 10px; user-select: none; }
+#preset-ctrl .fhdr .systag { flex: 0 0 auto; font-size: 8px; text-transform: uppercase; letter-spacing: .05em;
+  color: #e0a96d; border: 1px solid rgba(224,169,109,0.4); border-radius: 8px; padding: 1px 5px; }
+#preset-ctrl .sysact { display: flex; align-items: center; gap: 6px; margin: 2px 0 4px; padding-left: 12px; flex-wrap: wrap; }
+#preset-ctrl .sysact .tsel { flex: 0 0 auto; width: auto; font-size: 10px; padding: 1px 4px; }
+#preset-ctrl input[type=text], #preset-ctrl textarea { flex: 1; min-width: 0; background: #241019;
+  color: #f2e4de; border: 1px solid rgba(255,255,255,0.14); border-radius: 5px; padding: 2px 4px;
+  font: 10px ui-monospace, Menlo, monospace; }
+#preset-ctrl .r .src { flex: 0 0 auto; font-size: 8px; text-transform: uppercase; letter-spacing: .05em;
+  color: #9a8590; padding: 2px 5px; border: 1px solid rgba(255,255,255,0.14); border-radius: 8px;
+  white-space: nowrap; }
+#preset-ctrl .r .src.on { color: #7ad7c7; border-color: rgba(122,215,199,0.5); background: rgba(122,215,199,0.08); }
+#preset-ctrl .r .clr { flex: 0 0 auto; cursor: pointer; color: #8a7580; font-size: 11px; padding: 0 3px; user-select: none; }
+#preset-ctrl .r .clr:hover { color: #e0245e; }
+#preset-ctrl .r.pathrow { flex-wrap: wrap; }
+#preset-ctrl .r.pathrow > label { flex: 1 0 100%; margin-bottom: 3px; }
+#preset-ctrl .r.pathrow input[type=text] { flex: 1 1 60px; }
+#preset-ctrl .r .browse { flex: 0 0 auto; cursor: pointer; font-size: 12px; padding: 0 2px; opacity: .85; }
+#preset-ctrl .r .browse:hover { opacity: 1; }
+#preset-ctrl .assetmenu { margin: 2px 0 7px; background: #1a0e15; border: 1px solid rgba(255,255,255,0.14);
+  border-radius: 6px; max-height: 168px; overflow-y: auto; }
+#preset-ctrl .assetmenu .ai { padding: 3px 8px; cursor: pointer; font: 10px ui-monospace, Menlo, monospace;
+  color: #f2e4de; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#preset-ctrl .assetmenu .ai:hover { background: rgba(255,255,255,0.09); }
+#preset-ctrl .assetmenu .ai.gen { color: #9a8590; border-bottom: 1px solid rgba(255,255,255,0.08); }
+#preset-ctrl .r.ta { align-items: flex-start; }
+#preset-ctrl textarea { resize: vertical; line-height: 1.35; }
+`;
+
+export async function startPixiApp({ mount }) {
+  const app = new Application();
+  await app.init({ background: "#150a10", antialias: true, resolution: window.devicePixelRatio || 1, autoDensity: true, resizeTo: mount });
+  mount.appendChild(app.canvas);
+
+  let current = null, currentId = null;
+  const defaultStates = {};    // id -> pristine state for Reset
+  const rendererDefaults = {}; // renderer name -> its fresh state (captured once, before any tuning)
+
+  const style = document.createElement("style"); style.textContent = CSS; document.head.appendChild(style);
+  const openBtn = document.createElement("div"); openBtn.id = "preset-open"; document.body.appendChild(openBtn);
+  const dialog = document.createElement("div"); dialog.id = "preset-dialog"; document.body.appendChild(dialog);
+  const ctrlPanel = document.createElement("div"); ctrlPanel.id = "preset-ctrl"; document.body.appendChild(ctrlPanel);
+
+  // ---- library (localStorage), seeded from the built-in presets ----
+  const LIB_KEY = "cuddle.preset.library", LAST_KEY = "cuddle.preset.last";
+  let library;
+  try { library = JSON.parse(localStorage.getItem(LIB_KEY)); } catch { library = null; }
+  if (!Array.isArray(library) || !library.length) {
+    library = PRESETS.map((p) => ({ id: p.id, label: p.label, renderer: p.renderer, state: p.state || null }));
+  }
+  // Self-heal: add any built-in preset (new renderers) missing from a previously-saved library.
+  for (const p of PRESETS) {
+    if (!library.some((e) => e.id === p.id)) library.push({ id: p.id, label: p.label, renderer: p.renderer, state: p.state || null });
+  }
+  const persistLibrary = () => { try { localStorage.setItem(LIB_KEY, JSON.stringify(library)); } catch {} };
+  const libEntry = (id) => library.find((p) => p.id === id);
+
+  // Write a preset to the repo via serve.py (falls back silently if running plain http.server).
+  async function postPreset(entry) {
+    if (!entry?.state) return false;
+    try {
+      const data = { id: entry.id, label: entry.label, renderer: entry.renderer, ...entry.state };
+      const res = await fetch("/api/preset", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) });
+      return res.ok;
+    } catch { return false; }
+  }
+  const deletePresetFile = (id) => { fetch("/api/preset/delete", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id }) }).catch(() => {}); };
+  // Load presets committed under /presets/ into the library (repo is the shared source of truth).
+  async function loadRepoPresets() {
+    let files; try { files = await listAssets("/presets", ["json"]); } catch { return; }
+    let changed = false;
+    for (const path of files) {
+      try {
+        const st = await (await fetch(path)).json();
+        if (!st || !st.id) continue;
+        const entry = { id: st.id, label: st.label || st.id, renderer: st.renderer, state: st };
+        const ex = libEntry(st.id);
+        if (ex) { ex.label = entry.label; ex.renderer = entry.renderer; ex.state = entry.state; }
+        else library.push(entry);
+        changed = true;
+      } catch {}
+    }
+    if (changed) { persistLibrary(); refreshOpenBtn(); if (dialog.classList.contains("open")) buildDialog(); }
+  }
+  function commit() {
+    // flush a field being edited: text/textarea commit on blur, so make sure the focused one fires
+    try { const a = document.activeElement; if (a && a.blur && ctrlPanel.contains(a)) a.blur(); } catch {}
+    const e = libEntry(currentId); if (e && current?.getState) { e.state = current.getState(); persistLibrary(); }
+  }
+
+  // ---- Open button + dialog ----
+  function refreshOpenBtn() { const e = libEntry(currentId); openBtn.innerHTML = `Open Preset<span class="cur">${e ? e.label : "—"}</span>`; }
+  openBtn.onclick = () => { buildDialog(); dialog.classList.add("open"); };
+  dialog.onclick = (ev) => { if (ev.target === dialog) dialog.classList.remove("open"); };
+  function buildDialog() {
+    dialog.innerHTML = "";
+    const box = document.createElement("div"); box.className = "box";
+    box.innerHTML = `<h3>Open Preset</h3>`;
+    library.forEach((p) => {
+      const it = document.createElement("div");
+      it.className = "item" + (p.id === currentId ? " on" : "");
+      const builtin = PRESETS.some((b) => b.id === p.id);
+      it.innerHTML = `<span class="lbl">${p.label}</span><span class="ren">${p.renderer}</span>` + (builtin ? "" : `<span class="del" title="delete">✕</span>`);
+      it.querySelector(".lbl").onclick = () => { select(p.id); dialog.classList.remove("open"); };
+      it.querySelector(".ren").onclick = () => { select(p.id); dialog.classList.remove("open"); };
+      const del = it.querySelector(".del");
+      if (del) del.onclick = (e) => { e.stopPropagation(); deletePresetFile(p.id); library = library.filter((x) => x.id !== p.id); persistLibrary(); buildDialog(); };
+      box.appendChild(it);
+    });
+    const foot = document.createElement("div"); foot.className = "foot";
+    foot.innerHTML = `<button data-a="import">Import file…</button><button data-a="close">Close</button>`;
+    foot.querySelector('[data-a="import"]').onclick = importPreset;
+    foot.querySelector('[data-a="close"]').onclick = () => dialog.classList.remove("open");
+    box.appendChild(foot);
+    dialog.appendChild(box);
+  }
+
+  // ---- controls panel ----
+  const collapsedSys = new Set(); // particle systems collapsed in the panel (UI-only)
+  function buildControls() {
+    ctrlPanel.innerHTML = "";
+    const controls = current?.controls, params = current?.params;
+    if (!controls || !controls.length || !params) { ctrlPanel.style.display = "none"; return; }
+    ctrlPanel.style.display = "block";
+    const e = libEntry(currentId);
+    ctrlPanel.innerHTML = `<h3>${e ? e.label : currentId}</h3>`;
+    ctrlPanel.appendChild(buildActionBar()); // Save / Save As / Rename / Reset — saves the WHOLE preset
+    let lastGroup = null;
+    for (const c of controls) {
+      if (c.showIf && !c.showIf(params)) continue; // conditional visibility (e.g. single vs group PNG)
+      if (c.group && c.group !== lastGroup) {
+        lastGroup = c.group;
+        const g = document.createElement("div"); g.className = "grp"; g.textContent = c.group;
+        ctrlPanel.appendChild(g);
+      }
+      // text controls (node/edge PNG paths) reload textures on edit; `rebuild` controls re-render
+      // the panel (to show/hide dependent fields); others apply live.
+      const onCh = c.type === "text" ? () => current.applyTextures?.() : (c.rebuild ? () => buildControls() : undefined);
+      ctrlPanel.appendChild(makeControlRow(c, params, "r", onCh));
+    }
+    if (Array.isArray(params.filters)) buildFilterEditor(params.filters);
+    if (params.particleSystems) buildParticleEditor(params.particleSystems);
+    if (Array.isArray(params.events)) buildEventsEditor(params.events, params.particleSystems || {});
+  }
+
+  // One control row bound to obj[def.key] — type: range (default) | color | toggle | select.
+  // onChange (optional) fires after any edit (e.g. to rebuild particle emitters live).
+  function makeControlRow(def, obj, cls = "r", onChange) {
+    const row = document.createElement("div"); row.className = cls;
+    const val = obj[def.key]; const tip = (def.tip || def.key).replace(/"/g, "&quot;");
+    const type = def.type || "range";
+    if (type === "color") {
+      row.innerHTML = `<label title="${tip}">${def.label}</label><input type="color" value="${val}" title="${tip}">`;
+      row.querySelector("input").oninput = (ev) => { obj[def.key] = ev.target.value; onChange?.(); };
+    } else if (type === "toggle") {
+      row.innerHTML = `<label title="${tip}">${def.label}</label><input type="checkbox" ${val ? "checked" : ""} title="${tip}">`;
+      row.querySelector("input").onchange = (ev) => { obj[def.key] = ev.target.checked; onChange?.(); };
+    } else if (type === "select") {
+      const opts = (def.options || []).map((o) => `<option value="${o}" ${o === val ? "selected" : ""}>${o}</option>`).join("");
+      row.innerHTML = `<label title="${tip}">${def.label}</label><select title="${tip}">${opts}</select>`;
+      row.querySelector("select").onchange = (ev) => { obj[def.key] = ev.target.value; onChange?.(); };
+    } else if (type === "text") {
+      // Path fields get a full-width layout (label on its own line) so long paths aren't clipped,
+      // a 📁 browse button that lists served assets, a source badge, and a ✕ clear-to-default.
+      row.className = cls + " pathrow";
+      const esc = String(val ?? "").replace(/"/g, "&quot;");
+      const srcLabel = (set) => set ? (def.setLabel || "file") : (def.emptyLabel || "default");
+      const browse = def.pick ? `<span class="browse" title="browse served assets">📁</span>` : "";
+      row.innerHTML = `<label title="${tip}">${def.label}</label><input type="text" value="${esc}" placeholder="${def.placeholder || ""}" title="${tip}">${browse}<span class="src" title="current source"></span><span class="clr" title="clear — use the generated default">✕</span>`;
+      const input = row.querySelector("input"), badge = row.querySelector(".src"), clr = row.querySelector(".clr");
+      const sync = () => { const set = !!input.value.trim(); badge.textContent = srcLabel(set); badge.classList.toggle("on", set); clr.style.display = set ? "" : "none"; };
+      const setPath = (p) => { input.value = p; obj[def.key] = p; sync(); onChange?.(); };
+      input.oninput = sync;
+      input.onchange = () => { obj[def.key] = input.value.trim(); onChange?.(); };
+      clr.onclick = () => { setPath(""); };
+      if (def.pick) row.querySelector(".browse").onclick = () => toggleAssetMenu(row, def, setPath);
+      sync();
+    } else if (type === "textarea") {
+      row.className = cls + " ta";
+      const esc = String(val ?? "").replace(/</g, "&lt;");
+      row.innerHTML = `<label title="${tip}">${def.label}</label><textarea rows="4" spellcheck="false" placeholder="${def.placeholder || ""}" title="${tip}">${esc}</textarea>`;
+      row.querySelector("textarea").onchange = (ev) => { obj[def.key] = ev.target.value; onChange?.(); };
+    } else {
+      row.innerHTML = `<label title="${tip}">${def.label}</label>
+        <input type="range" min="${def.min}" max="${def.max}" step="${def.step}" value="${val}" title="${tip}">
+        <span class="v" title="${tip}">${(+val).toFixed(def.step < 1 ? 2 : 0)}</span>`;
+      const input = row.querySelector("input"), out = row.querySelector(".v");
+      input.oninput = () => { obj[def.key] = parseFloat(input.value); out.textContent = (+input.value).toFixed(def.step < 1 ? 2 : 0); onChange?.(); };
+    }
+    return row;
+  }
+
+  // Browse served assets: list files under def.pick.dir (matching def.pick.exts, one subfolder
+  // deep) via the dev server's directory listing, and show an inline menu to pick one. Keeps the
+  // path-reference model (stores e.g. "/assets/spark.png"). Falls back to a native file picker
+  // (assuming the file lives in the pick dir) if the listing can't be read.
+  async function listAssets(dir, exts) {
+    const base = dir.replace(/\/$/, ""), out = [];
+    const scan = async (d, depth) => {
+      let html; try { html = await (await fetch(d + "/")).text(); } catch { return; }
+      const doc = new DOMParser().parseFromString(html, "text/html");
+      for (const a of doc.querySelectorAll("a")) {
+        const h = a.getAttribute("href"); if (!h || h === "../" || h.startsWith("/") || h.startsWith("?")) continue;
+        if (h.endsWith("/")) { if (depth > 0) await scan(d + "/" + h.replace(/\/$/, ""), depth - 1); }
+        else if (exts.some((e) => h.toLowerCase().endsWith("." + e))) out.push(d + "/" + decodeURIComponent(h));
+      }
+    };
+    await scan(base, 1);
+    return out;
+  }
+  async function toggleAssetMenu(row, def, setPath) {
+    const open = row.nextElementSibling;
+    ctrlPanel.querySelectorAll(".assetmenu").forEach((m) => m.remove());
+    if (open && open.classList.contains("assetmenu")) return; // was open -> toggle closed
+    const menu = document.createElement("div"); menu.className = "assetmenu"; menu.textContent = "loading…";
+    row.after(menu);
+    const files = await listAssets(def.pick.dir, def.pick.exts);
+    menu.textContent = "";
+    if (!files.length) { // listing unavailable — native picker, assume the pick dir
+      menu.remove();
+      const inp = document.createElement("input"); inp.type = "file"; inp.accept = def.pick.exts.map((e) => "." + e).join(",");
+      inp.onchange = () => { const f = inp.files?.[0]; if (f) setPath(def.pick.dir.replace(/\/$/, "") + "/" + f.name); };
+      inp.click(); return;
+    }
+    const item = (label, cls, fn) => { const d = document.createElement("div"); d.className = "ai " + cls; d.textContent = label; d.onclick = () => { fn(); menu.remove(); }; menu.appendChild(d); };
+    item("— generated default —", "gen", () => setPath(""));
+    for (const f of files) item(f, "", () => setPath(f));
+  }
+
+  // Particle Systems editor — add/rename/delete systems, set a texture path per system, tune
+  // friendly params, and (advanced) paste editor JSON that overrides the sliders. Rebuild
+  // emitters on any edit. `aura` and `joinBurst` are the renderer's built-ins (not deletable);
+  // added systems fire once bound to an event.
+  // Download a particle system as a standalone emitter-JSON asset (save under /assets/emitters/,
+  // then point its Emitter JSON field at it to reuse it across presets).
+  function exportSystem(name, sys) {
+    const blob = new Blob([JSON.stringify(systemToConfig(sys), null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a"); a.href = url; a.download = (name || "system") + ".json"; a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+  const BUILTIN_SYS = { aura: 1, joinBurst: 1, ringBurst: 1 };
+  function buildParticleEditor(systems) {
+    const g = document.createElement("div"); g.className = "grp";
+    g.innerHTML = `Particle Systems <span class="mv add" title="new system">＋</span>`;
+    g.querySelector(".add").onclick = () => {
+      const name = (prompt("New particle system name:", "Sparkle") || "").trim();
+      if (!name) return;
+      let id = name.replace(/[^a-zA-Z0-9]+/g, "_").replace(/^_+|_+$/g, "") || "sys";
+      const base = id; let n = 2; while (systems[id]) id = base + "_" + n++;
+      systems[id] = newParticleSystem(name);
+      current.applyParticles?.(); buildControls();
+    };
+    ctrlPanel.appendChild(g);
+    const onEdit = () => current.applyParticles?.();
+    for (const name of Object.keys(systems)) {
+      const sys = systems[name];
+      const collapsed = collapsedSys.has(name);
+      const locked = !!BUILTIN_SYS[name]; // only the renderer's built-ins can't be deleted
+      const tag = sys.fromFolder ? `<span class="systag" title="auto-loaded from /assets/emitters — reappears on reload while the file exists">file</span>` : "";
+      const hdr = document.createElement("div"); hdr.className = "fhdr";
+      hdr.innerHTML = `<span class="caret" title="collapse / expand">${collapsed ? "▸" : "▾"}</span>
+        <span class="fname ren" title="rename">${sys.label || name}</span>${tag}
+        ${locked ? "" : `<span class="mv del" title="delete system">✕</span>`}`;
+      hdr.querySelector(".caret").onclick = () => { collapsed ? collapsedSys.delete(name) : collapsedSys.add(name); buildControls(); };
+      hdr.querySelector(".ren").onclick = () => { const nn = (prompt("Rename system:", sys.label || name) || "").trim(); if (nn) { sys.label = nn; buildControls(); } };
+      const del = hdr.querySelector(".del");
+      if (del) del.onclick = () => { delete systems[name]; current.applyParticles?.(); buildControls(); };
+      ctrlPanel.appendChild(hdr);
+      if (collapsed) continue;
+      // actions row: emission type + export + open-editor
+      const act = document.createElement("div"); act.className = "sysact";
+      act.innerHTML = `<select class="tsel" title="emission type">
+          <option value="continuous" ${sys.type === "continuous" ? "selected" : ""}>continuous</option>
+          <option value="hit" ${sys.type === "hit" ? "selected" : ""}>hit</option>
+        </select>
+        <span class="edlink exp" title="export this system as a standalone JSON asset (save it under /assets/emitters/, then point Emitter JSON at it)">⬇ export</span>
+        <span class="edlink" title="open the Pixi particle-emitter editor in a new tab, then save its export to this system's Emitter JSON">edit ↗</span>`;
+      act.querySelector(".tsel").onchange = (ev) => { sys.type = ev.target.value; current.applyParticles?.(); buildControls(); };
+      act.querySelector(".exp").onclick = () => exportSystem(name, sys);
+      act.querySelector(".edlink:not(.exp)").onclick = () => window.open("https://userland.pixijs.io/particle-emitter-editor/", "_blank", "noopener");
+      ctrlPanel.appendChild(act);
+      ctrlPanel.appendChild(makeControlRow({ key: "texture", label: "PNG", type: "text", placeholder: "/assets/spark.png", emptyLabel: "soft dot", setLabel: "PNG", pick: { dir: "/assets", exts: ["png", "jpg", "jpeg", "webp", "svg", "gif"] }, tip: "Texture path or URL served by the frontend — blank uses the soft dot" }, sys, "r fp", onEdit));
+      ctrlPanel.appendChild(makeControlRow({ key: "shape", label: "Shape", type: "select", options: ["scatter", "ring"], tip: "scatter = spray in random directions · ring = particles fly radially outward from the spawn point (an expanding ring ripple)" }, sys, "r fp", onEdit));
+      if (sys.config) { const nt = document.createElement("div"); nt.className = "rxn-set"; nt.textContent = "↓ overridden by the Emitter JSON (clear ✕ to use sliders)"; ctrlPanel.appendChild(nt); }
+      for (const p of SYSTEM_PARAMS) {
+        if (p.only && p.only !== sys.type) continue;
+        ctrlPanel.appendChild(makeControlRow(p, sys, "r fp", onEdit));
+      }
+      ctrlPanel.appendChild(makeControlRow({ key: "config", label: "Emitter JSON", type: "text", placeholder: "/assets/emitters/example.json", emptyLabel: "sliders", setLabel: "file", pick: { dir: "/assets", exts: ["json"] }, tip: "Path/URL to a Pixi particle-editor JSON file (edit it in the editor, save back down). When set it overrides the sliders above; the PNG + color still apply." }, sys, "r fp", onEdit));
+    }
+  }
+
+  // Events editor — reactions bound to each event (structure; runtime dispatch is next).
+  function buildEventsEditor(events, systems) {
+    const g = document.createElement("div"); g.className = "grp"; g.textContent = "Events";
+    ctrlPanel.appendChild(g);
+    // particle refs show the system's label but store its key (so it matches the Particle Systems panel)
+    const refOptions = (r) => r.type === "particle" ? Object.keys(systems).map((k) => ({ v: k, t: systems[k].label || k })) : r.type === "filter" ? FILTER_ORDER : ["scale", "halo", "opacity", "color", "graphic"];
+    const evTip = (id) => (EVENT_CATALOG.find((e) => e.id === id)?.tip || "").replace(/"/g, "&quot;");
+    events.forEach((ev) => {
+      const hdr = document.createElement("div"); hdr.className = "fhdr";
+      const tip = evTip(ev.id);
+      hdr.innerHTML = `<span class="fname evname" title="${tip}">${ev.label}</span>
+        <span class="evinfo" title="${tip}">ⓘ</span><span class="mv add" title="add reaction">＋</span>`;
+      hdr.querySelector(".add").onclick = () => { ev.reactions.push(makeReaction("particle")); buildControls(); };
+      ctrlPanel.appendChild(hdr);
+      ev.reactions.forEach((r, ri) => {
+        const off = r.active === false;
+        const box = document.createElement("div"); box.className = "rxn" + (off ? " off" : "");
+        const sel = (label, key, options) =>
+          `<div class="rr"><span>${label}</span><select data-k="${key}">${options.map((o) => { const v = o.v ?? o, t = o.t ?? o; return `<option value="${v}" ${v === r[key] ? "selected" : ""}>${t}</option>`; }).join("")}</select></div>`;
+        box.innerHTML = `<div class="rr"><span>on</span><input type="checkbox" class="actchk" ${off ? "" : "checked"} title="enable / disable this reaction"></div>` +
+          sel("type", "type", REACTION_TYPES) + sel("ref", "ref", refOptions(r)) +
+          sel("loc", "location", LOCATIONS) + sel("trig", "trigger", TRIGGERS) +
+          `<span class="mv del" title="remove">✕</span>`;
+        box.querySelector(".actchk").onchange = (e) => { r.active = e.target.checked; box.classList.toggle("off", !e.target.checked); };
+        box.querySelectorAll("select").forEach((s) => {
+          // type OR ref change re-renders so the exposed settings match the new target
+          s.onchange = () => { r[s.dataset.k] = s.value; if (s.dataset.k === "type") r.ref = ""; if (["type", "ref", "trigger"].includes(s.dataset.k)) buildControls(); };
+        });
+        box.querySelector(".del").onclick = () => { ev.reactions.splice(ri, 1); buildControls(); };
+        ctrlPanel.appendChild(box);
+        reactionSettings(r, box, systems); // inline settings for the referenced item
+      });
+    });
+  }
+
+  // Expose the referenced item's settings inline under a reaction. Filter → this instance's
+  // filter params (amplitude/…) + Duration, stored on the reaction. Property → Amount + Duration.
+  // Particle reactions show NO editable params here — a particle system is a shared, named thing
+  // edited once in the Particle Systems panel (or in the Pixi editor), not per event.
+  function reactionSettings(r, box, systems) {
+    if (!r.ref) return;
+    const note = () => { const d = document.createElement("div"); d.className = "rxn-set"; return d; };
+    if (r.type === "particle") {
+      const wrap = note(); wrap.textContent = "→ edit “" + (systems[r.ref]?.label || r.ref) + "” in Particle Systems"; box.appendChild(wrap);
+    } else if (r.type === "filter") {
+      const def = FILTERS[r.ref]; if (!def) return;
+      r.params = r.params || {};
+      for (const p of def.params) if (r.params[p.key] === undefined) r.params[p.key] = p.def; // seed (incl. center, hidden)
+      if (r.params.dur === undefined) r.params.dur = def.fx?.dur ?? 0.6;
+      const wrap = note(); wrap.textContent = "filter settings:"; box.appendChild(wrap);
+      for (const p of def.params) { if (p.key === "cx" || p.key === "cy") continue; box.appendChild(makeControlRow(p, r.params, "r fp")); } // center comes from location
+      box.appendChild(makeControlRow({ key: "dur", label: "Duration", min: 0.1, max: 2.5, step: 0.05, tip: "How long the ripple animates (s)" }, r.params, "r fp"));
+    } else if (r.type === "property") {
+      r.params = r.params || {};
+      const wrap = note(); wrap.textContent = "property settings:"; box.appendChild(wrap);
+      if (r.trigger === "modulate") {
+        // timed ramp keyed to cohort-time (fade-to-master, scale-up, exit unwind)
+        if (r.params.amount === undefined) r.params.amount = r.ref === "color" ? 1 : 0.2;
+        if (r.params.onset === undefined) r.params.onset = 0;
+        if (r.params.dur === undefined) r.params.dur = 1;
+        box.appendChild(makeControlRow({ key: "amount", label: r.ref === "color" ? "Mix" : "Amount", min: 0, max: r.ref === "color" ? 1 : 1.5, step: 0.02, tip: "Target depth of the ramp — color: mix toward the cohort color; scale/halo: × base; opacity: dim." }, r.params, "r fp"));
+        box.appendChild(makeControlRow({ key: "onset", label: "Onset", min: 0, max: 8, step: 0.1, tip: "Seconds in the cohort before the ramp begins." }, r.params, "r fp"));
+        box.appendChild(makeControlRow({ key: "dur", label: "Duration", min: 0.1, max: 6, step: 0.1, tip: "Seconds to ramp from nothing to full. Also eases back this fast when the node leaves." }, r.params, "r fp"));
+      } else if (r.trigger !== "hit" && (r.ref === "scale" || r.ref === "opacity" || r.ref === "halo")) {
+        // continuous reaction driven by a data source (beat oscillation, or a mapped value)
+        if (r.params.amount === undefined) r.params.amount = 0.5;
+        if (r.params.rate === undefined) r.params.rate = 1;
+        if (r.source === undefined) r.source = "beat";
+        box.appendChild(makeControlRow({ key: "source", label: "Source", type: "select", options: SOURCES, tip: "What drives it: beat = oscillate at the heartbeat (shape with Curve); hr / hrv / phase = map the person's current value onto the property (bigger value → more effect)." }, r, "r fp", () => buildControls()));
+        if (r.source === "beat") {
+          box.appendChild(makeControlRow({ key: "curve", label: "Curve", type: "select", options: CURVES, tip: "How it follows the heartbeat: cosine (smooth breathe) · bounce (sharp thump) · triangle · pulse (blip) · static." }, r, "r fp"));
+          box.appendChild(makeControlRow({ key: "rate", label: "Rate", min: 0.25, max: 4, step: 0.25, tip: "Frequency vs the actual heartbeat — 0.5 = half speed, 1 = 1:1, 2 = double." }, r.params, "r fp"));
+        }
+        box.appendChild(makeControlRow({ key: "amount", label: "Amount", min: 0, max: 1.5, step: 0.02, tip: "Depth of the effect (× base)." }, r.params, "r fp"));
+      } else {
+        // hit pulse
+        if (r.params.amount === undefined) r.params.amount = r.ref === "opacity" ? 0.6 : 0.5;
+        if (r.params.dur === undefined) r.params.dur = 0.4;
+        if (r.ref !== "color") box.appendChild(makeControlRow({ key: "amount", label: "Amount", min: 0, max: 1.5, step: 0.05, tip: "Strength of the pop/dip (× base)" }, r.params, "r fp"));
+        box.appendChild(makeControlRow({ key: "dur", label: "Duration", min: 0.05, max: 1.5, step: 0.05, tip: "Hit reactions fade over this many seconds" }, r.params, "r fp"));
+      }
+    }
+  }
+
+  // The filter stack: each filter has a toggle + reorder, and its params when active.
+  function buildFilterEditor(list) {
+    // Self-heal: add any registered filter missing from this preset's stack (inactive), so filters
+    // added after the preset was saved still show up without a Reset.
+    for (const type of FILTER_ORDER) {
+      if (FILTERS[type] && !list.some((f) => f.type === type)) {
+        const params = {}; for (const p of FILTERS[type].params) params[p.key] = p.def;
+        list.push({ type, active: false, params });
+      }
+    }
+    const g = document.createElement("div"); g.className = "grp"; g.textContent = "Filter Stack";
+    ctrlPanel.appendChild(g);
+    list.forEach((f, idx) => {
+      const def = FILTERS[f.type]; if (!def) return;
+      const hdr = document.createElement("div"); hdr.className = "fhdr";
+      hdr.innerHTML = `<input type="checkbox" ${f.active ? "checked" : ""} title="active">
+        <span class="fname ${f.active ? "" : "off"}">${def.label}</span>
+        <span class="mv up" title="move up">▲</span><span class="mv dn" title="move down">▼</span>`;
+      hdr.querySelector("input").onchange = (ev) => { f.active = ev.target.checked; buildControls(); };
+      hdr.querySelector(".up").onclick = () => { if (idx > 0) { [list[idx - 1], list[idx]] = [list[idx], list[idx - 1]]; buildControls(); } };
+      hdr.querySelector(".dn").onclick = () => { if (idx < list.length - 1) { [list[idx + 1], list[idx]] = [list[idx], list[idx + 1]]; buildControls(); } };
+      ctrlPanel.appendChild(hdr);
+      if (f.active) for (const p of def.params) ctrlPanel.appendChild(makeControlRow(p, f.params, "r fp"));
+    });
+  }
+  function note(msg) { const n = ctrlPanel.querySelector("#save-note"); if (n) { n.textContent = msg; setTimeout(() => { if (n.textContent === msg) n.textContent = ""; }, 1800); } }
+
+  // Preset file actions — pinned at the top of the panel. All of these operate on the WHOLE
+  // preset (every setting getState captures), not just the filter stack.
+  function buildActionBar() {
+    const bar = document.createElement("div"); bar.className = "sbar top";
+    bar.innerHTML = `<button data-a="save" title="Save all changes to this preset (to browser storage)">Save</button>
+      <button data-a="saveas" title="Save all current settings as a new preset">Save As…</button>
+      <button data-a="rename" title="Rename this preset">Rename</button>
+      <button data-a="export" title="Download this preset as a .json file (to share / commit to the repo)">Export</button>
+      <button data-a="reset" title="Revert to this preset's defaults">Reset</button>
+      <span class="note" id="save-note"></span>`;
+    bar.querySelector('[data-a="save"]').onclick = savePreset;
+    bar.querySelector('[data-a="saveas"]').onclick = saveAsPreset;
+    bar.querySelector('[data-a="rename"]').onclick = renamePreset;
+    bar.querySelector('[data-a="export"]').onclick = exportPreset;
+    bar.querySelector('[data-a="reset"]').onclick = resetPreset;
+    return bar;
+  }
+  // Download the current preset as a .json file — Import (in the Open dialog) reads it back, and it
+  // can be committed to the repo so a teammate gets it. Presets otherwise live only in localStorage.
+  function exportPreset() {
+    if (!current?.getState) return;
+    commit(); // flush any in-progress edit first
+    const e = libEntry(currentId);
+    const data = { id: currentId, renderer: e?.renderer, label: e?.label || currentId, ...current.getState() };
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a"); a.href = url;
+    a.download = ((e?.label || "preset").replace(/[^a-z0-9]+/gi, "-").toLowerCase() || "preset") + ".preset.json";
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    note("exported");
+  }
+  function renamePreset() {
+    const e = libEntry(currentId); if (!e) return;
+    const name = (prompt("Rename preset:", e.label) || "").trim(); if (!name) return;
+    e.label = name; persistLibrary(); refreshOpenBtn();
+    const h = ctrlPanel.querySelector("h3"); if (h) h.textContent = name;
+    note("renamed");
+  }
+
+  function savePreset() { commit(); postPreset(libEntry(currentId)).then((ok) => note(ok ? "saved → repo" : "saved (browser only)")); }
+  function saveAsPreset() {
+    const name = prompt("Save preset as:", (libEntry(currentId)?.label || "Preset") + " copy");
+    if (!name) return;
+    let id = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || ("preset-" + library.length);
+    while (libEntry(id)) id += "-2";
+    const renderer = libEntry(currentId)?.renderer || Object.keys(RENDERERS)[0];
+    const entry = { id, label: name, renderer, state: current.getState() };
+    library.push(entry);
+    persistLibrary(); select(id);
+    postPreset(entry).then((ok) => note(ok ? "saved “" + name + "” → repo" : "saved “" + name + "” (browser only)"));
+  }
+  function resetPreset() {
+    if (defaultStates[currentId] && current.setState) current.setState(defaultStates[currentId]);
+    commit(); buildControls(); note("reset to defaults");
+  }
+  function importPreset() {
+    const inp = document.createElement("input"); inp.type = "file"; inp.accept = "application/json,.json";
+    inp.onchange = () => {
+      const file = inp.files?.[0]; if (!file) return;
+      const r = new FileReader();
+      r.onload = () => {
+        try {
+          const st = JSON.parse(r.result);
+          const base = file.name.replace(/\.preset\.json$|\.json$/i, "") || "imported";
+          let id = base.toLowerCase().replace(/[^a-z0-9]+/g, "-") || "imported"; while (libEntry(id)) id += "-2";
+          library.push({ id, label: base, renderer: st.renderer || Object.keys(RENDERERS)[0], state: st });
+          persistLibrary(); dialog.classList.remove("open"); select(id); note("imported");
+        } catch { note("bad file"); }
+      };
+      r.readAsText(file);
+    };
+    inp.click();
+  }
+
+  function select(id) {
+    if (current) { commit(); app.stage.removeChild(current.container); current.destroy(); }
+    const def = libEntry(id) || library[0];
+    const factory = RENDERERS[def.renderer] || RENDERERS[Object.keys(RENDERERS)[0]];
+    current = factory(app); currentId = def.id;
+    app.stage.addChild(current.container);
+    // capture the renderer's pristine defaults on first use (before any state is applied),
+    // since CFG is module-level and gets mutated by later presets.
+    if (!rendererDefaults[def.renderer] && current.getState) rendererDefaults[def.renderer] = current.getState();
+    if (!defaultStates[def.id]) {
+      const builtin = PRESETS.find((p) => p.id === def.id);
+      defaultStates[def.id] = (builtin && builtin.state) ? builtin.state : rendererDefaults[def.renderer];
+    }
+    if (def.state && current.setState) current.setState(def.state);
+    try { localStorage.setItem(LAST_KEY, def.id); } catch {}
+    refreshOpenBtn(); buildControls();
+    mergeFolderSystems(); // pull in any /assets/emitters/*.json as file-backed systems
+  }
+
+  // Auto-surface emitter-folder files as particle systems: any /assets/emitters/*.json not already
+  // represented becomes a file-backed system (attachable to events, fired by the renderer). Keyed by
+  // filename, so a file that matches a built-in key (aura.json) is skipped. Async; rebuilds when done.
+  async function mergeFolderSystems() {
+    const systems = current?.params?.particleSystems; if (!systems) return;
+    let files; try { files = await listAssets("/assets/emitters", ["json"]); } catch { return; }
+    let added = false;
+    for (const path of files) {
+      const key = path.split("/").pop().replace(/\.[^.]+$/, "");
+      if (systems[key] || Object.values(systems).some((s) => s.config === path)) continue;
+      let type = "continuous";
+      try { const cfg = await (await fetch(path)).json(); if (!(cfg.emitterLifetime < 0)) type = "hit"; } catch {}
+      systems[key] = { ...newParticleSystem(key), type, color: "cohort", config: path, fromFolder: true };
+      added = true;
+    }
+    if (added) { current.applyParticles?.(); buildControls(); }
+  }
+
+  addEventListener("keydown", (e) => {
+    if (e.key === "Escape") { dialog.classList.remove("open"); return; }
+    // don't hijack number keys while the user is typing in a field (e.g. Variables Per Person)
+    const t = e.target;
+    if (t && (/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName) || t.isContentEditable)) return;
+    const i = parseInt(e.key, 10) - 1;
+    if (i >= 0 && i < library.length) select(library[i].id);
+  });
+  addEventListener("beforeunload", commit); // never lose edits
+
+  app.ticker.add((t) => { const frame = getFrame(); if (current && frame) current.update(frame, Math.min(0.05, t.deltaMS / 1000)); });
+
+  let startId; try { startId = localStorage.getItem(LAST_KEY); } catch {}
+  // load repo presets (serve.py) first so the selected one uses the committed version, then mount
+  loadRepoPresets().finally(() => select(libEntry(startId) ? startId : library[0].id));
+  return { app, select };
+}

@@ -1,0 +1,125 @@
+{
+  "id": "distribution",
+  "label": "Distribution",
+  "renderer": "distribution",
+  "version": 1,
+  "params": {
+    "variable": "hr",
+    "bins": 24,
+    "dotR": 14,
+    "gap": 7.5,
+    "beatPulse": 0,
+    "ease": 2,
+    "filters": [
+      {
+        "type": "bloom",
+        "active": true,
+        "params": {
+          "bloomScale": 1.1,
+          "threshold": 0.35,
+          "brightness": 1,
+          "blur": 7
+        }
+      },
+      {
+        "type": "glow",
+        "active": false,
+        "params": {
+          "outerStrength": 4,
+          "innerStrength": 0,
+          "color": "#ffffff"
+        }
+      },
+      {
+        "type": "outline",
+        "active": false,
+        "params": {
+          "thickness": 2,
+          "color": "#ffffff",
+          "alpha": 1
+        }
+      },
+      {
+        "type": "bevel",
+        "active": false,
+        "params": {
+          "rotation": 45,
+          "thickness": 2,
+          "lightAlpha": 0.7,
+          "shadowAlpha": 0.7,
+          "lightColor": "#ffffff",
+          "shadowColor": "#000000"
+        }
+      },
+      {
+        "type": "adjust",
+        "active": false,
+        "params": {
+          "brightness": 1,
+          "contrast": 1,
+          "saturation": 1,
+          "gamma": 1
+        }
+      },
+      {
+        "type": "rgbSplit",
+        "active": false,
+        "params": {
+          "amount": 4
+        }
+      },
+      {
+        "type": "blur",
+        "active": false,
+        "params": {
+          "strength": 4,
+          "quality": 4
+        }
+      },
+      {
+        "type": "bulgePinch",
+        "active": false,
+        "params": {
+          "radius": 200,
+          "strength": 0.4,
+          "cx": 0.5,
+          "cy": 0.5
+        }
+      },
+      {
+        "type": "zoomBlur",
+        "active": false,
+        "params": {
+          "strength": 0.1,
+          "innerRadius": 80,
+          "cx": 0.5,
+          "cy": 0.5
+        }
+      },
+      {
+        "type": "twist",
+        "active": false,
+        "params": {
+          "radius": 200,
+          "angle": 4,
+          "cx": 0.5,
+          "cy": 0.5
+        }
+      },
+      {
+        "type": "shockwave",
+        "active": false,
+        "params": {
+          "amplitude": 30,
+          "wavelength": 160,
+          "brightness": 1.1,
+          "cx": 0.5,
+          "cy": 0.5
+        }
+      }
+    ],
+    "bg": "#0b0a12",
+    "axisColor": "#5a5470",
+    "labelColor": "#e8e0f0"
+  }
+}
