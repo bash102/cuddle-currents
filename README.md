@@ -75,7 +75,9 @@ so a gateway stays a dumb bridge. Firmware lives in `firmware/`:
 
 Both provision Wi-Fi + broker at runtime via a captive portal (no Wi-Fi credentials in the
 repo). Rough sizing: ~`ceil(people / 6)` IDF gateways (≈5 for 30 people). See each firmware
-README for the toolchain, build, flash, and provisioning steps.
+README for the toolchain, build, flash, and provisioning steps, and
+[Running with BLE→WiFi gateways](#running-with-blewifi-gateways-mqtt) for the broker setup and
+the run-time wiring on the app side.
 
 **Over-the-air updates.** After the initial USB flash, the whole IDF-gateway fleet updates
 over Wi-Fi — bump `version.txt`, `idf.py build`, then push via the Ops "Update fleet" button
@@ -90,9 +92,11 @@ pip install -e .              # or: pip install -e '.[dev]' for tests
 # Run against the built-in simulator (no hardware needed) — the demo path:
 cuddle --source sim --scenario drift_into_sync --people 6
 
-# Then open, in two separate windows:
-#   Show view (clean puddle):   http://127.0.0.1:8770/
-#   Ops view  (technical):      http://127.0.0.1:8770/ops
+# Then open, in separate windows (typically on two monitors):
+#   Show     — the visualization:      http://127.0.0.1:8770/
+#   Ops      — technical + control:    http://127.0.0.1:8770/ops
+#   Viz      — author the look:        http://127.0.0.1:8770/viz-settings
+#   Puddle   — legacy force layout:    http://127.0.0.1:8770/puddle
 ```
 
 The simulator is just the demo path. `--source` selects where samples come from:
@@ -104,10 +108,11 @@ cuddle --source mqtt --broker 192.168.1.50:1883 --orchestrate   # + Level B mult
 cuddle --source replay --capture captures/session.jsonl         # replay a recording, no hardware
 ```
 
-`ble` needs bands in range of the Mac; `mqtt` needs a running broker (mosquitto) and at least
-one flashed gateway (see [`firmware/`](firmware/)); `--orchestrate` adds app-authoritative
-placement across gateways (Level B — see the roadmap). Any real-band run can add
-`--record captures/x.jsonl` to log raw samples for later hardware-free replay.
+`ble` needs bands in range of the Mac; `mqtt` needs a running broker and at least one flashed
+gateway — see [Running with BLE→WiFi gateways](#running-with-blewifi-gateways-mqtt) for the
+broker config, provisioning, and a hardware-free smoke test; `--orchestrate` adds
+app-authoritative placement across gateways (Level B — see the roadmap). Any real-band run can
+add `--record captures/x.jsonl` to log raw samples for later hardware-free replay.
 
 The server binds `127.0.0.1:8770` by default (an uncommon port, to avoid colliding
 with other local services). Override the port and host per-run with
@@ -123,7 +128,9 @@ On the **Ops** page: enroll each device (identify it by its live HR), press
 Each person gets a unique visual identity — a **color × shape** glyph (8 colors ×
 8 shapes = 64 combos, covering the 30-person target) plus a **seat number** — so
 anyone can find their own dot ("you're #7, the teal triangle"). The glyph and seat
-show on every Ops card; on the Show view, press **L** to reveal initials or numbers.
+show on every Ops card; the Show renderers label each dot with its display name (label
+colors are tunable in [Viz Settings](#the-four-views)), and `/puddle` cycles its own
+label modes with **L**.
 
 **Reusing bands across people** (for when you have fewer bands than people): on an
 Ops person card, the **band ▸** menu hands that person's band to someone else or
@@ -161,27 +168,148 @@ Recorded sessions replay without hardware:
 cuddle --source replay --capture captures/session.jsonl
 ```
 
-## Two independent frontends
+## Running with BLE→WiFi gateways (MQTT)
 
-The backend serves one WebSocket stream (`/ws`) to two decoupled pages, meant to run
+Three pieces: an **MQTT broker** on the Mac, one or more **flashed gateways** pointed at it, and
+the app run with `--source mqtt`. The app does all `0x2A37` decoding — a gateway is a dumb bridge.
+
+### 1. Broker (mosquitto)
+
+```bash
+brew install mosquitto
+```
+
+**Mosquitto 2.x will not accept gateway connections out of the box.** Started bare it logs
+*"Starting in local only mode"* and binds `127.0.0.1` + `[::1]` only — fine for an all-on-one-Mac
+test, invisible to an ESP32 on your LAN. Remote clients need a config file with an explicit
+listener:
+
+```conf
+# broker.conf — POC on a trusted LAN only (no auth; see the trust model below)
+listener 1883 0.0.0.0
+allow_anonymous true
+```
+
+```bash
+mosquitto -c broker.conf -v          # -v logs connects + every topic, worth it while debugging
+```
+
+Verify it's reachable off-box — `lsof -nP -i :1883` must show `*:1883`, not `127.0.0.1:1883`.
+
+### 2. Gateways
+
+Build and flash per the firmware README — [`firmware/gateway-idf/`](firmware/gateway-idf/README.md)
+(recommended, 6 bands) or [`firmware/gateway/`](firmware/gateway/README.md) (3 bands). Wi-Fi and
+broker are set at **runtime** via the captive portal, so no credentials live in the repo:
+
+1. Join the open Wi-Fi **`Cuddle-Gateway-Setup`** (hold **BOOT**/GPIO0 at reset to reopen it on an
+   already-provisioned gateway).
+2. The config page opens automatically, or visit `http://192.168.4.1`.
+3. Set your Wi-Fi network + password, and the **MQTT broker IP / port / gateway id**.
+
+Two things to get right: the broker IP must be the Mac's **LAN** address (not `127.0.0.1` — that
+would mean the ESP32 itself), and each **gateway id must be unique** since it's the `<gw>` in
+every topic. `secrets.h` only seeds compile-time *defaults* for these; the portal overrides them
+into NVS. Rough sizing: ~`ceil(people / 6)` IDF gateways.
+
+### 3. App
+
+```bash
+cuddle --source mqtt --broker 192.168.1.50:1883                   # the broker's LAN address
+cuddle --source mqtt --broker 192.168.1.50:1883 --orchestrate     # + Level B placement
+```
+
+Or persistently via `mqtt.broker` / `mqtt.port` in `config/app.yaml`. Add `--host 0.0.0.0` if
+gateways must reach the app for [OTA](firmware/gateway-idf/README.md#ota-updates).
+
+### Smoke test with no hardware
+
+Because the gateway is a pure bridge, anything that can publish those bytes is indistinguishable
+from real hardware — so with the broker and the app running (steps 1 and 3), you can exercise the
+whole ingestion path with no ESP32 and no bands:
+
+```bash
+mosquitto_sub -t 'cuddle/#' -v                    # watch traffic (real or faked)
+
+# One fake band beat: flags=0x10 (RR present), HR=0x48 (72 bpm), RR=0x0348 (840/1024 ≈ 0.82 s)
+mosquitto_pub -t 'cuddle/gw-test/hr/AA:BB:CC:DD:EE:FF' -m "$(printf '\x10\x48\x48\x03')"
+
+curl -s localhost:8770/api/state    # -> unassigned[0] = {device_id: AA:BB..., hr_bpm: 72}
+```
+
+The device then appears in the Ops **Unassigned devices** list, ready to enroll like any real band.
+
+Topics are `cuddle/<gw>/hr/<dev>` (raw `0x2A37`), `cuddle/<gw>/status/<dev>`, and
+`cuddle/<gw>/online` (retained LWT). `--orchestrate` adds `cuddle/<gw>/report`,
+`cuddle/<gw>/cmd`, and `cuddle/control/{mode,online}` — see the
+[managed mode section](firmware/gateway-idf/README.md#managed-mode-level-b--app-orchestrated-assignment).
+
+**Trust model:** no broker auth, plain TCP, and an unauthenticated `/api/ota` that can flash the
+whole fleet. Trusted LAN only — read the
+[OTA trust model](firmware/gateway-idf/README.md#ota-updates) before exposing any of this.
+
+## The four views
+
+The backend serves one WebSocket stream (`/ws`) to four decoupled pages, meant to run
 in parallel on different monitors:
 
-- **`/` Show** — the final visualization: a clean, full-screen "puddle." Each person is
-  a glyph in a gentle **force-directed layout where distance encodes correlation over
-  time**: strongly concordant hearts **clump** (and sub-groups that sync separately
-  settle into **separate clusters**, each with its own soft glow), uncorrelated people
-  sit **far apart**, and anti-correlated pairs are pushed **farthest of all**. Two
-  guards keep it honest — an **EMA** so only *sustained* concordance gathers a cluster
-  (not a one-frame spike), and the **flat-signal gate** above (a correlation counts only
-  when both hearts actually vary). Motion is heavily damped and speed-capped, so dots
-  ease into place rather than darting, and the constellation is sized to use the screen.
-  The beat is an in-place pulse. When someone becomes active (enrolled or handed a band)
-  a brief cue announces their glyph + seat ("Wren · #1 — sapphire circle"). Press **L**
-  to cycle on-dot labels (none → initials → seat number).
+| URL | View | What it is |
+|---|---|---|
+| `/` | **Show** | The live visualization — the projector output. No UI chrome. |
+| `/viz-settings` | **Viz Settings** | The same renderer plus the full authoring panel. |
+| `/ops` | **Ops** | Per-band technical status, enrollment, band reuse, scenario control. |
+| `/puddle` | **Puddle** | The original force-directed layout, kept as a fallback. |
+
+- **`/` Show** — one WebGL (PixiJS) canvas rendering the active **preset**. A preset is a
+  *style* (a bundle of settings) bound to a *renderer* (an engine): five ship in
+  `frontend/js/presets/registry.js` — **Node Chart 1** / **2**, **Chord Graph**,
+  **Scatter Plot**, **Distribution** — plus any `frontend/presets/*.preset.json`. Dots are
+  labelled with display names and pulse on each beat. Deliberately **chrome-free**: the
+  editor UI is never appended to this document, so a stray keystroke on the show laptop
+  can't summon a settings panel mid-event.
+- **`/viz-settings` Viz Settings** — the control panel. Identical code to `/`, mounted with
+  `chrome: true`, which adds an **Open Preset** button (top-left), the preset picker dialog
+  behind it, and a live parameter panel down the left edge. Hotkeys: **`1`–`9`** jump to that
+  position in the preset library (ignored while typing in a field, so a numeric parameter entry
+  doesn't switch presets), **`Esc`** closes the dialog. Edits **auto-push to the server**, so
+  this page drives the Show output live:
+
+  ```
+  /viz-settings ──POST /api/viz/active (every 300ms, diffed)──> server
+                                                                 ├── config/viz_active.json
+                                                                 └── broadcast /ws/viz ──> /
+  ```
+
+  The active config is **server-authoritative**. On load the panel adopts whatever `/` is
+  currently showing (`GET /api/viz/active`) rather than imposing this browser's last-used
+  preset, so a second laptop joins *in sync*; and a Show page that reconnects picks up the
+  live look instead of its own stale state. The preset **library** is per-browser
+  (`localStorage`); the **active config** is shared. Run the app with `--host 0.0.0.0` to
+  author from another machine.
 - **`/ops` Ops** — the technical status: per-band connection lifecycle, raw HR/RR trace
   + signal quality, the abstract per-person signal, and the synchrony heatmap. Cards
   sort **active sessions above disconnected ones**, and a person who (re)connects jumps
   to the top; each card has a **Remove** control (see band reuse above).
+- **`/puddle` Puddle** — the pre-Pixi visualization, still served: a clean, full-screen
+  "puddle." Each person is a glyph in a gentle **force-directed layout where distance
+  encodes correlation over time**: strongly concordant hearts **clump** (and sub-groups
+  that sync separately settle into **separate clusters**, each with its own soft glow),
+  uncorrelated people sit **far apart**, and anti-correlated pairs are pushed **farthest
+  of all**. Two guards keep it honest — an **EMA** so only *sustained* concordance gathers
+  a cluster (not a one-frame spike), and the **flat-signal gate** above (a correlation
+  counts only when both hearts actually vary). Motion is heavily damped and speed-capped,
+  so dots ease into place rather than darting, and the constellation is sized to use the
+  screen. The beat is an in-place pulse. When someone becomes active (enrolled or handed a
+  band) a brief cue announces their glyph + seat ("Wren · #1 — sapphire circle"). Press
+  **L** to cycle on-dot labels (none → initials → seat number).
+
+**Authoring presets without the backend.** `/viz-settings` needs a running `cuddle` (it renders
+live band data). To iterate on the *look* alone, `frontend/` also serves a standalone harness
+against a frontend-side simulator — `cd frontend && python3 serve.py`, then
+`http://127.0.0.1:8081/dev.html`. Both paths share the same `POST /api/preset` contract, so the
+panel's **Save** writes committable `frontend/presets/*.preset.json` either way. See
+[`frontend/VIZ_DATA_REFERENCE.md`](frontend/VIZ_DATA_REFERENCE.md) for the panel's controls,
+the per-person fields each renderer reads, and the particle/event system.
 
 ## Architecture
 
@@ -222,8 +350,13 @@ Key modules:
   missed/extra-beat repair) feeding HRV/synchrony; surgical so it doesn't flatten the
   real dynamics the coherence metric reads. Config under `artifact:` in `app.yaml`.
 - `processing/synchrony.py` — concordance + PLV + group cohesion.
-- `frontend/js/show/puddle.js` — the force-directed puddle: concordance→distance
+- `frontend/js/show/puddle.js` — the `/puddle` force-directed layout: concordance→distance
   mapping, flat-signal gate, and temporal smoothing (tunables at the top of `FORCE`).
+- `frontend/js/show/pixiApp.js` — the `/` and `/viz-settings` Pixi bootstrap: preset library,
+  the `chrome` flag that gates the whole authoring UI, and `applyConfig`/`getState`.
+- `frontend/js/presets/registry.js` — the style-vs-renderer split; add a style to `PRESETS`
+  or register a whole new engine in `RENDERERS`.
+- `transport/viz_config.py` — the server-held active viz config broadcast on `/ws/viz`.
 
 ## Roadmap (Phase 2)
 

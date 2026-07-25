@@ -100,12 +100,23 @@ up to ~9) — not achievable via an arduino-cli `-D` flag. Until then, plan gate
 ## Validate end-to-end (no app UI needed)
 
 ```bash
-mosquitto -p 1883                                   # broker on the Mac (192.168.1.212)
+# mosquitto 2.x with no config file starts in "local only mode" — it binds 127.0.0.1 +
+# [::1] and a gateway on the LAN can never reach it. Give it an explicit listener:
+cat > broker.conf <<'EOF'
+listener 1883 0.0.0.0
+allow_anonymous true
+EOF
+mosquitto -c broker.conf -v                         # broker on the Mac (192.168.1.212)
+
 mosquitto_sub -t 'cuddle/#' -v                      # watch the gateway's traffic
 # flash the board; you should see:  cuddle/esp32-01/online 1
 # with a band nearby:               cuddle/esp32-01/status/<addr> {"event":"connected",...}
 #                                    cuddle/esp32-01/hr/<addr> <binary>
 ```
+
+`lsof -nP -i :1883` should show `*:1883`, not `127.0.0.1:1883`. No auth and plain TCP —
+trusted LAN only; see the [broker setup notes](../../README.md#running-with-blewifi-gateways-mqtt)
+in the root README.
 
 Then run the app against the same broker to see it in the UI:
 
