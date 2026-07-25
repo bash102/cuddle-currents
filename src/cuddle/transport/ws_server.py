@@ -190,8 +190,8 @@ def create_app(engine) -> FastAPI:
 
         await sock.accept()
         engine.viz_config.add_client(sock)
-        await sock.send_text(_json.dumps(engine.viz_config.get()))
         try:
+            await sock.send_text(_json.dumps(engine.viz_config.get()))
             while True:
                 await sock.receive_text()  # client is receive-only; keeps the socket open
         except WebSocketDisconnect:

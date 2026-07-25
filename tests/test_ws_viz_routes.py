@@ -19,12 +19,6 @@ class FakeEngine:
     async def stop(self):
         pass
 
-    def add_client(self, ws):
-        pass
-
-    def remove_client(self, ws):
-        pass
-
 
 def _client(tmp_path):
     return TestClient(create_app(FakeEngine(tmp_path)))
