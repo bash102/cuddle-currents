@@ -640,10 +640,14 @@ export async function startPixiApp({ mount, chrome = true }) {
     if (!config) return;
     const id = config.id || "__active__";
     let e = libEntry(id);
+    const prevRenderer = e?.renderer;
     if (!e) { e = { id, label: config.label || id, renderer: config.renderer, state: config }; library.push(e); }
     else { e.label = config.label || e.label; e.renderer = config.renderer; e.state = config; }
-    const sameRenderer = current && libEntry(currentId)?.renderer === config.renderer;
-    if (currentId === id && sameRenderer && current?.setState) current.setState(config);
+    // setState only when the SAME preset id is already mounted with the SAME renderer
+    // (avoids a renderer rebuild/flicker on every ~300ms push); any renderer change or
+    // id switch rebuilds via select().
+    const sameRenderer = current && currentId === id && prevRenderer === config.renderer;
+    if (sameRenderer && current?.setState) current.setState(config);
     else select(id);
   }
   return { app, select, applyConfig, getState: currentConfig };
