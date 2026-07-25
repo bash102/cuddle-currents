@@ -479,16 +479,33 @@ export async function startPixiApp({ mount }) {
   // preset (every setting getState captures), not just the filter stack.
   function buildActionBar() {
     const bar = document.createElement("div"); bar.className = "sbar top";
-    bar.innerHTML = `<button data-a="save" title="Save all changes to this preset">Save</button>
+    bar.innerHTML = `<button data-a="save" title="Save all changes to this preset (to browser storage)">Save</button>
       <button data-a="saveas" title="Save all current settings as a new preset">Save As…</button>
       <button data-a="rename" title="Rename this preset">Rename</button>
+      <button data-a="export" title="Download this preset as a .json file (to share / commit to the repo)">Export</button>
       <button data-a="reset" title="Revert to this preset's defaults">Reset</button>
       <span class="note" id="save-note"></span>`;
     bar.querySelector('[data-a="save"]').onclick = savePreset;
     bar.querySelector('[data-a="saveas"]').onclick = saveAsPreset;
     bar.querySelector('[data-a="rename"]').onclick = renamePreset;
+    bar.querySelector('[data-a="export"]').onclick = exportPreset;
     bar.querySelector('[data-a="reset"]').onclick = resetPreset;
     return bar;
+  }
+  // Download the current preset as a .json file — Import (in the Open dialog) reads it back, and it
+  // can be committed to the repo so a teammate gets it. Presets otherwise live only in localStorage.
+  function exportPreset() {
+    if (!current?.getState) return;
+    commit(); // flush any in-progress edit first
+    const e = libEntry(currentId);
+    const data = { ...current.getState(), renderer: e?.renderer, label: e?.label || currentId };
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a"); a.href = url;
+    a.download = ((e?.label || "preset").replace(/[^a-z0-9]+/gi, "-").toLowerCase() || "preset") + ".preset.json";
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    note("exported");
   }
   function renamePreset() {
     const e = libEntry(currentId); if (!e) return;
