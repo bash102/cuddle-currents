@@ -507,6 +507,13 @@ def test_orchestrate_defaults_false():
     assert engine.orchestrator is None
 
 
+def test_engine_builds_viz_config_store():
+    from cuddle.transport.viz_config import VizConfigStore
+    engine = _engine()  # existing helper: Engine(_StubMqttSource(), source_type=Source.mqtt)
+    assert isinstance(engine.viz_config, VizConfigStore)
+    assert engine.viz_config.get() is None  # nothing set/loaded yet
+
+
 def test_orchestrate_true_with_non_mqtt_source_raises():
     with pytest.raises(ValueError, match="orchestration requires the mqtt source"):
         Engine(object(), source_type=Source.sim, orchestrate=True)

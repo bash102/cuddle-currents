@@ -21,6 +21,7 @@ from cuddle.hub.ingest import IngestHub
 from cuddle.hub.orchestration.orchestrator import Orchestrator
 from cuddle.hub.registry import SessionStore
 from cuddle.processing import frame as frame_builder
+from cuddle.transport.viz_config import VizConfigStore
 
 FIRMWARE_DIR = Path(__file__).resolve().parents[2] / "firmware_ota"
 
@@ -56,6 +57,8 @@ class Engine:
             self.store, source, config=self.cfg, store_path=enrollment_path
         )
         self.ingest = IngestHub(source, self.store, self.enrollment, capture_path=capture_path)
+        # Server-authoritative active viz preset (broadcast to Show clients over /ws/viz).
+        self.viz_config = VizConfigStore("config/viz_active.json")
         self.latest: StateFrame | None = None
         self._clients: set = set()
         self._frame_task: asyncio.Task | None = None
@@ -99,6 +102,7 @@ class Engine:
 
     async def start(self) -> None:
         self.enrollment.load()
+        self.viz_config.load()
         self.enrollment.rebind_source()
         await self.source.start()
         await self.ingest.start()
