@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fastapi import FastAPI, File, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, File, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -99,8 +99,10 @@ def create_app(engine) -> FastAPI:
     async def favicon() -> Response:
         return Response(status_code=204)
 
-    if (FRONTEND / "js").exists():
-        app.mount("/js", StaticFiles(directory=FRONTEND / "js"), name="js")
+    for _name in ("js", "vendor", "assets", "presets"):
+        _dir = FRONTEND / _name
+        if _dir.exists():
+            app.mount(f"/{_name}", StaticFiles(directory=_dir), name=_name)
 
     # ---- data -----------------------------------------------------------
 
@@ -168,6 +170,34 @@ def create_app(engine) -> FastAPI:
         except ValueError as e:
             return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
         return JSONResponse({"ok": True, "scenario": body.scenario})
+
+    # ---- viz config (server-authoritative active preset) ----------------
+
+    @app.get("/api/viz/active")
+    async def viz_active_get() -> JSONResponse:
+        return JSONResponse(engine.viz_config.get())
+
+    @app.post("/api/viz/active")
+    async def viz_active_set(request: Request) -> JSONResponse:
+        config = await request.json()
+        engine.viz_config.set(config)
+        await engine.viz_config.broadcast()
+        return JSONResponse({"ok": True})
+
+    @app.websocket("/ws/viz")
+    async def ws_viz(sock: WebSocket) -> None:
+        import json as _json
+
+        await sock.accept()
+        engine.viz_config.add_client(sock)
+        await sock.send_text(_json.dumps(engine.viz_config.get()))
+        try:
+            while True:
+                await sock.receive_text()  # client is receive-only; keeps the socket open
+        except WebSocketDisconnect:
+            pass
+        finally:
+            engine.viz_config.remove_client(sock)
 
     @app.post("/api/orchestrator/mode")
     async def orch_mode(body: OrchModeBody) -> JSONResponse:
