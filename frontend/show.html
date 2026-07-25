@@ -6,16 +6,29 @@
     <title>Cuddle Currents</title>
     <link rel="stylesheet" href="/theme.css" />
     <style>
-      html, body { margin: 0; height: 100%; background: var(--show-bg); overflow: hidden; }
-      #puddle { display: block; width: 100vw; height: 100vh; }
+      html, body { margin: 0; height: 100%; background: #150a10; overflow: hidden; }
+      #stage { position: absolute; inset: 0; }
+      #stage canvas { display: block; }
     </style>
+    <script type="importmap">
+      { "imports": { "pixi.js": "/vendor/pixi.min.mjs" } }
+    </script>
   </head>
   <body>
-    <canvas id="puddle"></canvas>
+    <div id="stage"></div>
     <script type="module">
       import { connect } from "./js/ws.js";
-      import "./js/show/puddle.js";
-      connect();
+      import { startPixiApp } from "./js/show/pixiApp.js";
+      import { subscribeVizConfig } from "./js/vizConfigClient.js";
+
+      const DEFAULT_PRESET = "node-graph";
+      connect(); // live /ws -> shared store
+      const pix = await startPixiApp({ mount: document.getElementById("stage"), chrome: false });
+      subscribeVizConfig((config) => {
+        if (config) pix.applyConfig(config);
+        else pix.select(DEFAULT_PRESET);
+      });
+      window.pix = pix;
     </script>
   </body>
 </html>

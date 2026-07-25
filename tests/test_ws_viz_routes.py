@@ -85,3 +85,9 @@ def test_delete_preset_removes_file(tmp_path, monkeypatch):
     r = client.post("/api/preset/delete", json={"id": "gone"})
     assert r.status_code == 200
     assert not (tmp_path / "presets" / "gone.preset.json").exists()
+
+
+def test_pages_serve(tmp_path):
+    client = _client(tmp_path)
+    for path in ("/", "/viz-settings", "/puddle", "/ops"):
+        assert client.get(path).status_code == 200

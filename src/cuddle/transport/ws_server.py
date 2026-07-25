@@ -101,6 +101,14 @@ def create_app(engine) -> FastAPI:
     async def ops() -> FileResponse:
         return FileResponse(FRONTEND / "ops.html")
 
+    @app.get("/viz-settings")
+    async def viz_settings() -> FileResponse:
+        return FileResponse(FRONTEND / "viz-settings.html")
+
+    @app.get("/puddle")
+    async def puddle() -> FileResponse:
+        return FileResponse(FRONTEND / "puddle.html")
+
     @app.get("/theme.css")
     async def theme() -> FileResponse:
         return FileResponse(FRONTEND / "theme.css", media_type="text/css")

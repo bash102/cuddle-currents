@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Cuddle Currents · Viz Settings</title>
+    <link rel="stylesheet" href="/theme.css" />
+    <style>
+      html, body { margin: 0; height: 100%; background: #150a10; overflow: hidden; }
+      #stage { position: absolute; inset: 0; }
+      #stage canvas { display: block; }
+    </style>
+    <script type="importmap">
+      { "imports": { "pixi.js": "/vendor/pixi.min.mjs" } }
+    </script>
+  </head>
+  <body>
+    <div id="stage"></div>
+    <script type="module">
+      import { connect } from "./js/ws.js";
+      import { startPixiApp } from "./js/show/pixiApp.js";
+
+      connect(); // live /ws -> store (drive test scenarios from /ops)
+      const pix = await startPixiApp({ mount: document.getElementById("stage"), chrome: true });
+
+      // Adopt whatever the Show is currently displaying (server-authoritative), so a second
+      // machine starts in sync rather than from this browser's local last-used preset.
+      let last = "";
+      try {
+        const active = await (await fetch("/api/viz/active")).json();
+        if (active) { pix.applyConfig(active); last = JSON.stringify(pix.getState()); }
+      } catch {}
+
+      // Auto-push edits to the server, debounced by diffing getState() each tick. The
+      // `last` seed above prevents echoing the adopted config straight back.
+      setInterval(() => {
+        const st = pix.getState();
+        if (!st) return;
+        const s = JSON.stringify(st);
+        if (s === last) return;
+        last = s;
+        fetch("/api/viz/active", {
+          method: "POST", headers: { "Content-Type": "application/json" }, body: s,
+        }).catch(() => {});
+      }, 300);
+
+      window.pix = pix;
+    </script>
+  </body>
+</html>
