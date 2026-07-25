@@ -210,6 +210,7 @@ function makePersonCard(p) {
       <div class="metric"><label>HR± var</label><span class="hrvar">—</span></div>
       <div class="metric"><label>RMSSD</label><span class="rmssd">—</span></div>
       <div class="metric"><label>ΔHRV</label><span class="hrvd">—</span></div>
+      <div class="metric"><label>RRI</label><span class="rri">—</span></div>
     </div>
     <div class="qualwrap"><div class="qualbar"><div class="qualfill"></div></div><span class="qflags"></span></div>
     <div class="tracewrap"><canvas class="trace" width="400" height="64"></canvas></div>
@@ -228,6 +229,7 @@ function makePersonCard(p) {
     hrvar: root.querySelector(".hrvar"),
     rmssd: root.querySelector(".rmssd"),
     hrvd: root.querySelector(".hrvd"),
+    rri: root.querySelector(".rri"),
     qualfill: root.querySelector(".qualfill"),
     qflags: root.querySelector(".qflags"),
     trace: root.querySelector(".trace"),
@@ -303,6 +305,9 @@ function updatePersonCard(n, p) {
   }
   n.rmssd.textContent = p.rmssd != null ? `${p.rmssd.toFixed(0)} ms` : "—";
   n.hrvd.textContent = p.rmssd_delta != null ? `${p.rmssd_delta >= 0 ? "+" : ""}${p.rmssd_delta.toFixed(0)}%` : "—";
+  // Latest RR interval (rr_tail is in seconds) shown in ms — the raw beat-to-beat time.
+  const rr = p.rr_tail && p.rr_tail.length ? p.rr_tail[p.rr_tail.length - 1] : null;
+  n.rri.textContent = rr != null ? `${(rr * 1000).toFixed(0)} ms` : "—";
 
   const q = p.quality ?? 0;
   const t = theme();
