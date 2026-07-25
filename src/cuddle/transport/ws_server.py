@@ -12,6 +12,8 @@ opened, refreshed, or closed without affecting the other.
 
 from __future__ import annotations
 
+import json
+import re
 from pathlib import Path
 
 from fastapi import FastAPI, File, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect
@@ -22,6 +24,14 @@ from pydantic import BaseModel
 from cuddle.hub import ota as ota_helpers
 
 FRONTEND = Path(__file__).resolve().parents[3] / "frontend"
+
+_PRESET_ID_RE = re.compile(r"[^a-z0-9_-]+")
+
+
+def _safe_preset_name(pid) -> str:
+    """Sanitize a preset id to a bare filename stem (matches tools/serve.py.safe_name)."""
+    fn = _PRESET_ID_RE.sub("-", str(pid or "preset").lower()).strip("-")
+    return fn or "preset"
 
 
 class EnrollBody(BaseModel):
@@ -198,6 +208,36 @@ def create_app(engine) -> FastAPI:
             pass
         finally:
             engine.viz_config.remove_client(sock)
+
+    # ---- preset library (repo = shared source of truth) -----------------
+
+    @app.get("/api/presets")
+    async def presets_list() -> JSONResponse:
+        d = FRONTEND / "presets"
+        names = sorted(p.name for p in d.glob("*.preset.json")) if d.exists() else []
+        return JSONResponse([f"/presets/{n}" for n in names])
+
+    @app.post("/api/preset")
+    async def preset_save(request: Request) -> JSONResponse:
+        data = await request.json()
+        presets_dir = (FRONTEND / "presets").resolve()
+        name = _safe_preset_name(data.get("id")) + ".preset.json"
+        path = (presets_dir / name).resolve()
+        if path.parent != presets_dir:
+            raise HTTPException(400, "bad preset id")
+        presets_dir.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(data, indent=2))
+        return JSONResponse({"ok": True, "file": f"presets/{name}"})
+
+    @app.post("/api/preset/delete")
+    async def preset_delete(request: Request) -> JSONResponse:
+        data = await request.json()
+        presets_dir = (FRONTEND / "presets").resolve()
+        name = _safe_preset_name(data.get("id")) + ".preset.json"
+        path = (presets_dir / name).resolve()
+        if path.parent == presets_dir and path.is_file():
+            path.unlink()
+        return JSONResponse({"ok": True})
 
     @app.post("/api/orchestrator/mode")
     async def orch_mode(body: OrchModeBody) -> JSONResponse:
