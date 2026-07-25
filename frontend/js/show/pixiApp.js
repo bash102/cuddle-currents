@@ -540,7 +540,8 @@ export async function startPixiApp({ mount }) {
     const name = (prompt("Rename preset:", e.label) || "").trim(); if (!name) return;
     e.label = name; persistLibrary(); refreshOpenBtn();
     const h = ctrlPanel.querySelector("h3"); if (h) h.textContent = name;
-    note("renamed");
+    // also write the new label to the repo file, else it reverts on reload (repo wins on load)
+    postPreset(e).then((ok) => note(ok ? "renamed → repo" : "renamed (browser only)"));
   }
 
   function savePreset() { commit(); postPreset(libEntry(currentId)).then((ok) => note(ok ? "saved → repo" : "saved (browser only)")); }
