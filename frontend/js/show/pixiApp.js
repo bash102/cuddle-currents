@@ -128,7 +128,7 @@ const CSS = `
 #preset-ctrl textarea { resize: vertical; line-height: 1.35; }
 `;
 
-export async function startPixiApp({ mount }) {
+export async function startPixiApp({ mount, chrome = true }) {
   const app = new Application();
   await app.init({ background: "#150a10", antialias: true, resolution: window.devicePixelRatio || 1, autoDensity: true, resizeTo: mount });
   mount.appendChild(app.canvas);
@@ -138,9 +138,10 @@ export async function startPixiApp({ mount }) {
   const rendererDefaults = {}; // renderer name -> its fresh state (captured once, before any tuning)
 
   const style = document.createElement("style"); style.textContent = CSS; document.head.appendChild(style);
-  const openBtn = document.createElement("div"); openBtn.id = "preset-open"; document.body.appendChild(openBtn);
-  const dialog = document.createElement("div"); dialog.id = "preset-dialog"; document.body.appendChild(dialog);
-  const ctrlPanel = document.createElement("div"); ctrlPanel.id = "preset-ctrl"; document.body.appendChild(ctrlPanel);
+  const openBtn = document.createElement("div"); openBtn.id = "preset-open";
+  const dialog = document.createElement("div"); dialog.id = "preset-dialog";
+  const ctrlPanel = document.createElement("div"); ctrlPanel.id = "preset-ctrl";
+  if (chrome) document.body.append(openBtn, dialog, ctrlPanel);
 
   // ---- library (localStorage), seeded from the built-in presets ----
   const LIB_KEY = "cuddle.preset.library", LAST_KEY = "cuddle.preset.last";
@@ -168,7 +169,7 @@ export async function startPixiApp({ mount }) {
   const deletePresetFile = (id) => { fetch("/api/preset/delete", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id }) }).catch(() => {}); };
   // Load presets committed under /presets/ into the library (repo is the shared source of truth).
   async function loadRepoPresets() {
-    let files; try { files = await listAssets("/presets", ["json"]); } catch { return; }
+    let files; try { files = await (await fetch("/api/presets")).json(); } catch { return; }
     let changed = false;
     for (const path of files) {
       try {
@@ -615,7 +616,7 @@ export async function startPixiApp({ mount }) {
     if (added) { current.applyParticles?.(); buildControls(); }
   }
 
-  addEventListener("keydown", (e) => {
+  if (chrome) addEventListener("keydown", (e) => {
     if (e.key === "Escape") { dialog.classList.remove("open"); return; }
     // don't hijack number keys while the user is typing in a field (e.g. Variables Per Person)
     const t = e.target;
@@ -629,6 +630,26 @@ export async function startPixiApp({ mount }) {
 
   let startId; try { startId = localStorage.getItem(LAST_KEY); } catch {}
   // load repo presets (serve.py) first so the selected one uses the committed version, then mount
-  loadRepoPresets().finally(() => select(libEntry(startId) ? startId : library[0].id));
-  return { app, select };
+  await loadRepoPresets().catch(() => {});
+  select(libEntry(startId) ? startId : library[0].id);
+  function currentConfig() {
+    if (!current?.getState) return null;
+    const e = libEntry(currentId);
+    return { id: currentId, label: e?.label || currentId, renderer: e?.renderer, ...current.getState() };
+  }
+  function applyConfig(config) {
+    if (!config) return;
+    const id = config.id || "__active__";
+    let e = libEntry(id);
+    const prevRenderer = e?.renderer;
+    if (!e) { e = { id, label: config.label || id, renderer: config.renderer, state: config }; library.push(e); }
+    else { e.label = config.label || e.label; e.renderer = config.renderer; e.state = config; }
+    // setState only when the SAME preset id is already mounted with the SAME renderer
+    // (avoids a renderer rebuild/flicker on every ~300ms push); any renderer change or
+    // id switch rebuilds via select().
+    const sameRenderer = current && currentId === id && prevRenderer === config.renderer;
+    if (sameRenderer && current?.setState) current.setState(config);
+    else select(id);
+  }
+  return { app, select, applyConfig, getState: currentConfig };
 }

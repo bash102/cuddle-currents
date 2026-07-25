@@ -12,9 +12,11 @@ opened, refreshed, or closed without affecting the other.
 
 from __future__ import annotations
 
+import json
+import re
 from pathlib import Path
 
-from fastapi import FastAPI, File, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, File, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -22,6 +24,14 @@ from pydantic import BaseModel
 from cuddle.hub import ota as ota_helpers
 
 FRONTEND = Path(__file__).resolve().parents[3] / "frontend"
+
+_PRESET_ID_RE = re.compile(r"[^a-z0-9_-]+")
+
+
+def _safe_preset_name(pid) -> str:
+    """Sanitize a preset id to a bare filename stem (matches tools/serve.py.safe_name)."""
+    fn = _PRESET_ID_RE.sub("-", str(pid or "preset").lower()).strip("-")
+    return fn or "preset"
 
 
 class EnrollBody(BaseModel):
@@ -91,6 +101,14 @@ def create_app(engine) -> FastAPI:
     async def ops() -> FileResponse:
         return FileResponse(FRONTEND / "ops.html")
 
+    @app.get("/viz-settings")
+    async def viz_settings() -> FileResponse:
+        return FileResponse(FRONTEND / "viz-settings.html")
+
+    @app.get("/puddle")
+    async def puddle() -> FileResponse:
+        return FileResponse(FRONTEND / "puddle.html")
+
     @app.get("/theme.css")
     async def theme() -> FileResponse:
         return FileResponse(FRONTEND / "theme.css", media_type="text/css")
@@ -99,8 +117,10 @@ def create_app(engine) -> FastAPI:
     async def favicon() -> Response:
         return Response(status_code=204)
 
-    if (FRONTEND / "js").exists():
-        app.mount("/js", StaticFiles(directory=FRONTEND / "js"), name="js")
+    for _name in ("js", "vendor", "assets", "presets"):
+        _dir = FRONTEND / _name
+        if _dir.exists():
+            app.mount(f"/{_name}", StaticFiles(directory=_dir), name=_name)
 
     # ---- data -----------------------------------------------------------
 
@@ -168,6 +188,64 @@ def create_app(engine) -> FastAPI:
         except ValueError as e:
             return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
         return JSONResponse({"ok": True, "scenario": body.scenario})
+
+    # ---- viz config (server-authoritative active preset) ----------------
+
+    @app.get("/api/viz/active")
+    async def viz_active_get() -> JSONResponse:
+        return JSONResponse(engine.viz_config.get())
+
+    @app.post("/api/viz/active")
+    async def viz_active_set(request: Request) -> JSONResponse:
+        config = await request.json()
+        engine.viz_config.set(config)
+        await engine.viz_config.broadcast()
+        return JSONResponse({"ok": True})
+
+    @app.websocket("/ws/viz")
+    async def ws_viz(sock: WebSocket) -> None:
+        import json as _json
+
+        await sock.accept()
+        engine.viz_config.add_client(sock)
+        try:
+            await sock.send_text(_json.dumps(engine.viz_config.get()))
+            while True:
+                await sock.receive_text()  # client is receive-only; keeps the socket open
+        except WebSocketDisconnect:
+            pass
+        finally:
+            engine.viz_config.remove_client(sock)
+
+    # ---- preset library (repo = shared source of truth) -----------------
+
+    @app.get("/api/presets")
+    async def presets_list() -> JSONResponse:
+        d = FRONTEND / "presets"
+        names = sorted(p.name for p in d.glob("*.preset.json")) if d.exists() else []
+        return JSONResponse([f"/presets/{n}" for n in names])
+
+    @app.post("/api/preset")
+    async def preset_save(request: Request) -> JSONResponse:
+        data = await request.json()
+        presets_dir = (FRONTEND / "presets").resolve()
+        name = _safe_preset_name(data.get("id")) + ".preset.json"
+        path = (presets_dir / name).resolve()
+        if path.parent != presets_dir:
+            raise HTTPException(400, "bad preset id")
+        presets_dir.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(data, indent=2))
+        return JSONResponse({"ok": True, "file": f"presets/{name}"})
+
+    @app.post("/api/preset/delete")
+    async def preset_delete(request: Request) -> JSONResponse:
+        data = await request.json()
+        presets_dir = (FRONTEND / "presets").resolve()
+        name = _safe_preset_name(data.get("id")) + ".preset.json"
+        path = (presets_dir / name).resolve()
+        if path.parent == presets_dir and path.is_file():
+            path.unlink()
+        return JSONResponse({"ok": True})
 
     @app.post("/api/orchestrator/mode")
     async def orch_mode(body: OrchModeBody) -> JSONResponse:
