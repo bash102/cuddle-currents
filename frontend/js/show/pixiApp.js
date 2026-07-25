@@ -630,7 +630,8 @@ export async function startPixiApp({ mount, chrome = true }) {
 
   let startId; try { startId = localStorage.getItem(LAST_KEY); } catch {}
   // load repo presets (serve.py) first so the selected one uses the committed version, then mount
-  loadRepoPresets().finally(() => select(libEntry(startId) ? startId : library[0].id));
+  await loadRepoPresets().catch(() => {});
+  select(libEntry(startId) ? startId : library[0].id);
   function currentConfig() {
     if (!current?.getState) return null;
     const e = libEntry(currentId);
