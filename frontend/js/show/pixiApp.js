@@ -155,6 +155,34 @@ export async function startPixiApp({ mount }) {
   }
   const persistLibrary = () => { try { localStorage.setItem(LIB_KEY, JSON.stringify(library)); } catch {} };
   const libEntry = (id) => library.find((p) => p.id === id);
+
+  // Write a preset to the repo via serve.py (falls back silently if running plain http.server).
+  async function postPreset(entry) {
+    if (!entry?.state) return false;
+    try {
+      const data = { id: entry.id, label: entry.label, renderer: entry.renderer, ...entry.state };
+      const res = await fetch("/api/preset", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) });
+      return res.ok;
+    } catch { return false; }
+  }
+  const deletePresetFile = (id) => { fetch("/api/preset/delete", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id }) }).catch(() => {}); };
+  // Load presets committed under /presets/ into the library (repo is the shared source of truth).
+  async function loadRepoPresets() {
+    let files; try { files = await listAssets("/presets", ["json"]); } catch { return; }
+    let changed = false;
+    for (const path of files) {
+      try {
+        const st = await (await fetch(path)).json();
+        if (!st || !st.id) continue;
+        const entry = { id: st.id, label: st.label || st.id, renderer: st.renderer, state: st };
+        const ex = libEntry(st.id);
+        if (ex) { ex.label = entry.label; ex.renderer = entry.renderer; ex.state = entry.state; }
+        else library.push(entry);
+        changed = true;
+      } catch {}
+    }
+    if (changed) { persistLibrary(); refreshOpenBtn(); if (dialog.classList.contains("open")) buildDialog(); }
+  }
   function commit() {
     // flush a field being edited: text/textarea commit on blur, so make sure the focused one fires
     try { const a = document.activeElement; if (a && a.blur && ctrlPanel.contains(a)) a.blur(); } catch {}
@@ -177,7 +205,7 @@ export async function startPixiApp({ mount }) {
       it.querySelector(".lbl").onclick = () => { select(p.id); dialog.classList.remove("open"); };
       it.querySelector(".ren").onclick = () => { select(p.id); dialog.classList.remove("open"); };
       const del = it.querySelector(".del");
-      if (del) del.onclick = (e) => { e.stopPropagation(); library = library.filter((x) => x.id !== p.id); persistLibrary(); buildDialog(); };
+      if (del) del.onclick = (e) => { e.stopPropagation(); deletePresetFile(p.id); library = library.filter((x) => x.id !== p.id); persistLibrary(); buildDialog(); };
       box.appendChild(it);
     });
     const foot = document.createElement("div"); foot.className = "foot";
@@ -515,15 +543,17 @@ export async function startPixiApp({ mount }) {
     note("renamed");
   }
 
-  function savePreset() { commit(); note("saved"); }
+  function savePreset() { commit(); postPreset(libEntry(currentId)).then((ok) => note(ok ? "saved → repo" : "saved (browser only)")); }
   function saveAsPreset() {
     const name = prompt("Save preset as:", (libEntry(currentId)?.label || "Preset") + " copy");
     if (!name) return;
     let id = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || ("preset-" + library.length);
     while (libEntry(id)) id += "-2";
     const renderer = libEntry(currentId)?.renderer || Object.keys(RENDERERS)[0];
-    library.push({ id, label: name, renderer, state: current.getState() });
-    persistLibrary(); select(id); note("saved as “" + name + "”");
+    const entry = { id, label: name, renderer, state: current.getState() };
+    library.push(entry);
+    persistLibrary(); select(id);
+    postPreset(entry).then((ok) => note(ok ? "saved “" + name + "” → repo" : "saved “" + name + "” (browser only)"));
   }
   function resetPreset() {
     if (defaultStates[currentId] && current.setState) current.setState(defaultStates[currentId]);
@@ -598,6 +628,7 @@ export async function startPixiApp({ mount }) {
   app.ticker.add((t) => { const frame = getFrame(); if (current && frame) current.update(frame, Math.min(0.05, t.deltaMS / 1000)); });
 
   let startId; try { startId = localStorage.getItem(LAST_KEY); } catch {}
-  select(libEntry(startId) ? startId : library[0].id);
+  // load repo presets (serve.py) first so the selected one uses the committed version, then mount
+  loadRepoPresets().finally(() => select(libEntry(startId) ? startId : library[0].id));
   return { app, select };
 }

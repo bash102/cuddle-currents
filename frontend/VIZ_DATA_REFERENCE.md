@@ -8,9 +8,13 @@ vendored under `frontend/vendor/` and loaded via the import map in `dev.html`. J
 
 ```
 cd frontend
-python3 -m http.server 8081
-# then open http://127.0.0.1:8081/dev.html
+python3 serve.py          # http://127.0.0.1:8081/dev.html
+# (plain `python3 -m http.server 8081` also works, but Save-to-repo is disabled)
 ```
+
+`serve.py` serves the same static files **and** lets the panel's **Save** write presets to
+`frontend/presets/*.preset.json` (committable, shared via git; loaded on startup). With plain
+http.server, Save falls back to browser localStorage and you can still **Export** a preset to a file.
 
 **The page has two halves:**
 - **Left — the stage.** The live PixiJS render of the current preset.
