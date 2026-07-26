@@ -172,11 +172,24 @@ static void connectTo(const char* addrStr, uint8_t type) {
 }
 
 // ---- config + provisioning -------------------------------------------------
+// A stable per-board hex suffix so a fleet flashed from ONE image is auto-unique.
+// The gateway id becomes the MQTT client id ("cuddle-gw-<gwid>"), and a broker evicts
+// the existing session whenever another client connects with the same id — so two
+// boards sharing an id knock each other offline in a loop. Use the device-unique HIGH
+// 24 bits of the efuse MAC: the low 24 are the OUI, identical across a batch.
+static String macSuffix() {
+  char buf[8];
+  snprintf(buf, sizeof(buf), "%06lx", (unsigned long)((ESP.getEfuseMac() >> 24) & 0xFFFFFF));
+  return String(buf);
+}
+
 static void loadConfig() {
   prefs.begin("gwcfg", false);
   g_broker = prefs.getString("broker", MQTT_BROKER);
   g_port   = prefs.getInt("port", MQTT_PORT);
-  g_gwid   = prefs.getString("gwid", GATEWAY_ID);
+  // Default id = GATEWAY_ID + per-chip suffix. A name set via the portal (stored in NVS
+  // under "gwid") is used verbatim, so already-provisioned boards keep their id.
+  g_gwid   = prefs.getString("gwid", String(GATEWAY_ID) + "-" + macSuffix());
 }
 
 static void saveConfig() {
@@ -315,6 +328,12 @@ void setup() {
 
   mqtt.setServer(g_broker.c_str(), g_port);
   mqtt.setBufferSize(256);
+  // PubSubClient defaults to a 15s keepalive, but connectTo() runs inline in loop() and a
+  // failed BLE connect blocks for the NimBLE connect timeout (~30s by default). One bad
+  // connect would therefore outlast the keepalive, the broker would drop us, and the
+  // retained last-will would report the gateway offline until it reconnected. Give the
+  // keepalive enough headroom to cover a blocked connect (broker tolerates ~1.5x this).
+  mqtt.setKeepAlive(90);
   ensureMqtt();
 
   NimBLEDevice::init(g_gwid.c_str());
@@ -333,9 +352,13 @@ void loop() {
   ensureMqtt();
   mqtt.loop();
 
-  // Perform any queued connects (kept out of the scan callback).
+  // Perform ONE queued connect per iteration (kept out of the scan callback).
+  // connectTo() blocks for as long as the NimBLE connect takes, so draining the whole
+  // queue back-to-back could stall loop() for minutes with several failing bands —
+  // starving mqtt.loop() and dropping the broker link. One at a time lets MQTT run
+  // between attempts; the rest stay queued for the next iteration.
   ConnectReq req;
-  while (xQueueReceive(connectQueue, &req, 0) == pdTRUE) {
+  if (xQueueReceive(connectQueue, &req, 0) == pdTRUE) {
     connectTo(req.addr, req.type);
   }
 

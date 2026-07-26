@@ -499,13 +499,39 @@ static String macSuffix() {
   return String(buf);
 }
 
+// The suffix firmware BEFORE 1.0.2 computed: the LOW 24 bits of the efuse MAC, which
+// are the OUI (vendor prefix) and therefore IDENTICAL for every board in a batch.
+static String legacyMacSuffix() {
+  char buf[8];
+  snprintf(buf, sizeof(buf), "%06lx", (unsigned long)(ESP.getEfuseMac() & 0xFFFFFF));
+  return String(buf);
+}
+
 static void loadConfig() {
   prefs.begin("gwcfg", false);
   g_broker = prefs.getString("broker", MQTT_BROKER);
   g_port   = prefs.getInt("port", MQTT_PORT);
   // Default id = GATEWAY_ID + per-chip MAC suffix (auto-unique across a fleet). A name set
   // explicitly via the portal (persisted in NVS under "gwid") is used verbatim.
-  g_gwid   = prefs.getString("gwid", String(GATEWAY_ID) + "-" + macSuffix());
+  const String autoId   = String(GATEWAY_ID) + "-" + macSuffix();
+  const String legacyId = String(GATEWAY_ID) + "-" + legacyMacSuffix();
+  g_gwid = prefs.getString("gwid", autoId);
+
+  // Self-heal a stored batch-collision id. Pre-1.0.2 boards defaulted to legacyId (same
+  // string on every board in a batch) AND wrote it to NVS on first boot; NVS wins over
+  // the computed default, so the 1.0.2 macSuffix fix could never reach an already-
+  // provisioned board. A whole fleet sharing one id means one MQTT client id
+  // ("cuddle-gw-<gwid>"), and a broker evicts the existing session whenever another
+  // gateway connects with the same id — so the gateways knock each other offline in a
+  // loop, each eviction firing the retained `online=0` last-will.
+  // Only the exact auto-derived legacy string is dropped, so a name typed into the
+  // portal is never touched.
+  if (g_gwid != autoId && g_gwid == legacyId) {
+    prefs.remove("gwid");
+    g_gwid = autoId;
+    Serial.printf("gwid: dropped legacy batch-collision id '%s' -> '%s'\n",
+                  legacyId.c_str(), g_gwid.c_str());
+  }
 }
 
 static void saveConfig() {
@@ -836,6 +862,12 @@ void setup() {
   mqtt.setServer(g_broker.c_str(), g_port);
   mqtt.setCallback(mqttCallback);
   mqtt.setBufferSize(MQTT_BUF_SIZE);  // sized for the full report[] worst case; see MQTT_BUF_SIZE
+  // PubSubClient defaults to a 15s keepalive, but connectTo() runs inline in loop() and a
+  // failed BLE connect blocks for the NimBLE connect timeout (~30s by default). One bad
+  // connect would therefore outlast the keepalive, the broker would drop us, and the
+  // retained last-will would report the gateway offline until it reconnected. Give the
+  // keepalive enough headroom to cover a blocked connect (broker tolerates ~1.5x this).
+  mqtt.setKeepAlive(90);
   ensureMqtt();
 
   NimBLEDevice::init(g_gwid.c_str());
@@ -892,9 +924,13 @@ void loop() {
     }
   }
 
-  // Perform any queued connects (kept out of the scan callback).
+  // Perform ONE queued connect per iteration (kept out of the scan callback).
+  // connectTo() blocks for as long as the NimBLE connect takes, so draining the whole
+  // queue back-to-back could stall loop() for minutes with several failing bands —
+  // starving mqtt.loop() and dropping the broker link. One at a time lets MQTT (and the
+  // LED/health gate) run between attempts; the rest stay queued for the next iteration.
   ConnectReq req;
-  while (xQueueReceive(connectQueue, &req, 0) == pdTRUE) {
+  if (xQueueReceive(connectQueue, &req, 0) == pdTRUE) {
     connectTo(req.addr, req.type);
   }
 

@@ -110,6 +110,57 @@ Implemented and build-verified (`idf.py build` clean, no new warnings); **on-har
 validation of managed mode is still pending** — no gateway has been flashed and run against a
 live orchestrator yet, so treat this as build-verified, not field-verified.
 
+## Troubleshooting: the whole fleet drops offline at random
+
+Two independent causes, both fixed in **1.0.5** — worth knowing because the first one
+survives a firmware update and needs a one-time broker cleanup.
+
+**1. Duplicate gateway id ⇒ duplicate MQTT client id.** The gateway id becomes the MQTT
+client id (`cuddle-gw-<gwid>`), and a broker evicts the existing session whenever another
+client connects with the same id. A fleet sharing one id therefore knocks itself offline
+in a round-robin: each gateway's reconnect kicks the previous one, and every eviction
+fires the retained `cuddle/<gw>/online = 0` last-will. All five gateways look like they
+"randomly" drop.
+
+Firmware before 1.0.2 derived the id suffix from the *low* 24 bits of the efuse MAC — the
+OUI, identical across a production batch — so every board defaulted to the same
+`esp32-01-<oui>`. 1.0.2 fixed the derivation, but **that fix could not reach an already
+provisioned board**: the colliding id had been written to NVS on first boot, and NVS wins
+over the computed default. 1.0.5 detects that exact stored value and drops it, so the
+device-unique default takes over on the next boot (a name you typed into the portal is
+never touched). Watch for this on the serial log:
+
+```
+gwid: dropped legacy batch-collision id 'esp32-01-a172e0' -> 'esp32-01-ac8cd4'
+```
+
+Because the id changes, the **old retained topics linger on the broker as a ghost
+gateway**. Clear them once (empty retained payload), per stale id:
+
+```bash
+mosquitto_pub -h <broker> -t cuddle/esp32-01-a172e0/online -r -n
+mosquitto_pub -h <broker> -t cuddle/esp32-01-a172e0/report -r -n
+```
+
+Confirm the fleet is actually distinct — five gateways should mean five ids:
+
+```bash
+mosquitto_sub -h <broker> -t 'cuddle/+/online' -v -W 3
+```
+
+**2. A blocked BLE connect starved the MQTT keepalive.** `connectTo()` runs inline in
+`loop()` and blocks for the NimBLE connect timeout (~30 s) when a band doesn't answer,
+while PubSubClient's default keepalive is only **15 s** — so a single failed connect could
+outlast it and the broker would drop the link (again firing the offline last-will). With
+30 bands in a room, failed connects are routine. 1.0.5 raises the keepalive to 90 s and
+processes **one** queued connect per `loop()` iteration, so `mqtt.loop()` runs between
+attempts instead of after a whole queue of them.
+
+If drops persist after this, suspect the radio rather than the code: five ESP32s each
+holding 6 BLE links share the 2.4 GHz band with Wi-Fi, and BLE/Wi-Fi coexist on one
+antenna. Spread the gateways out, keep them off a congested channel, and check RSSI in
+the `report` payload.
+
 ## OTA updates
 
 Gateways receive firmware updates via MQTT-triggered pull:
