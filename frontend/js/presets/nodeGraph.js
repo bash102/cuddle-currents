@@ -109,6 +109,9 @@ const CFG = {
   layoutRingR: 0.4,                                   // ring radius fraction
   layoutXVar: "hr", layoutYVar: "hrv",                // scatter axes
   layoutColX: "spread", layoutColY: "stack",          // column: how columns order (X) / members stack (Y)
+  // cohort DETECTION gate (turns the synchrony matrix into qualified links — see sim/cohort.js).
+  // Raise qualOn / qualTime / varLo to cut false positives.
+  concTau: 1.0, qualOn: 0.6, qualTime: 3.0, qualOff: 0.4, varLo: 0.8, varHi: 3.0,
   // idle motion
   drift: 6, driftTurn: 1.6, center: 0.04,
   // cohort attraction (spring to centroid) + collision bounce + cohort separation
@@ -169,6 +172,17 @@ export const CONTROLS = [
     tip: "How the columns are ordered left→right: spread = arbitrary even spacing; or by a variable (the group's average). Each cohort is one column; each solo is its own." },
   { group: "Layout", key: "layoutColY", label: "Column Y", type: "select", options: ["stack", ...LVAR_KEYS], showIf: (p) => p.layout === "column",
     tip: "How members stack within a column: stack = seat order; or sorted by a variable (lowest at the base)." },
+
+  { group: "Cohort Detection", key: "qualOn", label: "Qualify @", min: 0.2, max: 1, step: 0.02,
+    tip: "Smoothed concordance a pair must exceed to start counting as in-sync. Higher = fewer false positives (only strong sync connects)." },
+  { group: "Cohort Detection", key: "qualTime", label: "Hold time", min: 0, max: 12, step: 0.5,
+    tip: "Seconds the concordance must stay above the threshold before a pair qualifies. Higher = only SUSTAINED sync counts — the main knob against false positives." },
+  { group: "Cohort Detection", key: "qualOff", label: "Release @", min: 0, max: 1, step: 0.02,
+    tip: "A qualified pair stays qualified until concordance drops below this (hysteresis, so it doesn't flicker)." },
+  { group: "Cohort Detection", key: "varLo", label: "Flat gate", min: 0, max: 6, step: 0.1,
+    tip: "HR variability (bpm) at/below which a signal is treated as flat and NOT trusted — a flat heart correlates only noise. Higher = distrust flat signals more." },
+  { group: "Cohort Detection", key: "concTau", label: "Smoothing", min: 0.2, max: 5, step: 0.1,
+    tip: "Concordance smoothing (EMA seconds). Higher = steadier, less jittery, slower to react." },
 
   { group: "Physics", key: "gravityK", label: "Gravity", min: 0, max: 6, step: 0.1,
     tip: "How strongly cohort members are pulled toward their cohort's center. Higher = tighter, faster gathering." },
@@ -505,6 +519,8 @@ export function createNodeGraph(app) {
     const pos = new Map(arr.map((n, i) => [n, i]));
 
     // --- pass 1: cohort tracker + union-find ---
+    // feed the live detection thresholds so they're tunable from the viz controls (false positives)
+    tracker.cfg = { concTau: CFG.concTau, qualOn: CFG.qualOn, qualTime: CFG.qualTime, qualOff: CFG.qualOff, fadeTau: 0.5, varLo: CFG.varLo, varHi: CFG.varHi };
     const uf = unionFind(N);
     const pd = [];
     const liveKeys = new Set();

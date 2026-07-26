@@ -41,7 +41,9 @@ export class CohortTracker {
   // qual = has it sustained long enough, vis = 0..1 eased visibility.
   update(key, raw, hrVarA, hrVarB, dt) {
     const c = this.cfg;
-    const gated = raw * Math.min(varTrust(hrVarA), varTrust(hrVarB));
+    // flat-signal gate, using THIS tracker's varLo/varHi (so a preset can tune it live)
+    const vt = (v) => (v == null ? 1 : Math.max(0, Math.min(1, (v - c.varLo) / (c.varHi - c.varLo))));
+    const gated = raw * Math.min(vt(hrVarA), vt(hrVarB));
     let e = this.m.get(key);
     // Start at 0, not the first raw value: a pair must genuinely BUILD concordance to
     // qualify — it can't inherit a stale coincidental correlation and qualify instantly.
