@@ -344,6 +344,7 @@ export function createNodeGraph(app) {
   container.addChild(bloomGroup, labelsLayer);
 
   const tracker = new CohortTracker();
+  let lastCohortSig = ""; // detects live threshold changes to re-evaluate qualified pairs
   const choreo = new Choreographer(field, eventFX); // fires CFG.events reactions
   const nodes = new Map(); // pid -> record
 
@@ -520,6 +521,14 @@ export function createNodeGraph(app) {
 
     // --- pass 1: cohort tracker + union-find ---
     // feed the live detection thresholds so they're tunable from the viz controls (false positives)
+    const cohortSig = `${CFG.qualOn}|${CFG.qualTime}|${CFG.qualOff}|${CFG.varLo}|${CFG.varHi}|${CFG.concTau}`;
+    if (cohortSig !== lastCohortSig) {
+      lastCohortSig = cohortSig;
+      // thresholds just changed (a control edit, or a config pushed to a Show client) — re-evaluate
+      // existing pairs so TIGHTENING immediately drops false positives instead of holding them via
+      // hysteresis. Genuine pairs (still above the new qualOn) keep their qualification.
+      for (const e of tracker.m.values()) if (Math.abs(e.s) < CFG.qualOn) { e.qual = false; e.held = 0; }
+    }
     tracker.cfg = { concTau: CFG.concTau, qualOn: CFG.qualOn, qualTime: CFG.qualTime, qualOff: CFG.qualOff, fadeTau: 0.5, varLo: CFG.varLo, varHi: CFG.varHi };
     const uf = unionFind(N);
     const pd = [];
