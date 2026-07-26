@@ -55,6 +55,14 @@ only seeds compile-time defaults for the MQTT broker / port / gateway id:
 cp main/secrets.h.example main/secrets.h   # edit broker/port/gwid; gitignored
 ```
 
+Portal edits are written to NVS **when you hit Save**, not after the Wi-Fi join — a
+failed join reboots the board, so saving later would discard everything you just typed.
+Invalid fields (blank broker, port outside 1–65535, gateway id containing `/`, `+`, `#`)
+are rejected in favour of the stored value, and an unchanged submit writes nothing. Rules
+live in `main/portal_fields.h`; run them with `firmware/test/run.sh` (no board needed).
+This needs WiFiManager **2.x** (`setSaveParamsCallback`), which `setup-components.sh`
+vendors from the arduino-cli libraries dir.
+
 ## Build & flash
 
 ```bash

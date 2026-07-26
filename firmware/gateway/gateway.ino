@@ -25,6 +25,7 @@
 #include <WiFi.h>
 #include <WiFiManager.h>
 #include <Preferences.h>
+#include "portal_fields.h"
 #include <PubSubClient.h>
 #include <NimBLEDevice.h>
 #include "secrets.h"
@@ -184,6 +185,25 @@ static void saveConfig() {
   prefs.putString("gwid", g_gwid);
 }
 
+// Copy validated portal field values over the running config. Invalid fields (empty
+// broker, out-of-range port, topic-unsafe gateway id) are ignored so a bad submit can
+// never clobber a working config — see portal_fields.h for the rules.
+// Returns true if something actually changed, so NVS is only written on a real edit
+// (the portal's defaults are the current values, so an untouched submit is a no-op).
+static bool applyPortalFields(const char* broker, const char* port, const char* gwid) {
+  PfConfig cfg;
+  snprintf(cfg.broker, sizeof(cfg.broker), "%s", g_broker.c_str());
+  snprintf(cfg.gwid,   sizeof(cfg.gwid),   "%s", g_gwid.c_str());
+  cfg.port = g_port;
+
+  if (!pf_apply(&cfg, broker, port, gwid)) return false;
+
+  g_broker = cfg.broker;
+  g_port   = cfg.port;
+  g_gwid   = cfg.gwid;
+  return true;
+}
+
 // Join saved Wi-Fi, or raise a captive portal (SoftAP + web form) to be provisioned
 // from a phone. Hold BOOT (GPIO0) at reset to force the portal and change settings.
 static void provision() {
@@ -205,6 +225,19 @@ static void provision() {
   wm.addParameter(&p_gwid);
   wm.setConfigPortalTimeout(180);  // seconds to wait in the portal before giving up
 
+  // Persist the instant the user hits Save in the portal — NOT after the Wi-Fi join.
+  // The join is the step most likely to fail (mistyped password, AP out of range), and
+  // a failed join restarts the board below; anything written only after that point is
+  // lost, so the user would have to retype broker/port/gateway-id on every attempt.
+  // WiFiManager fires this callback while the portal is still up, before any of that.
+  wm.setSaveParamsCallback([&]() {
+    if (applyPortalFields(p_broker.getValue(), p_port.getValue(), p_gwid.getValue())) {
+      saveConfig();
+      Serial.printf("portal: saved to NVS | broker %s:%d | gateway %s\n",
+                    g_broker.c_str(), g_port, g_gwid.c_str());
+    }
+  });
+
   bool ok;
   if (forcePortal) {
     Serial.println("BOOT held -> opening config portal 'Cuddle-Gateway-Setup'");
@@ -214,16 +247,17 @@ static void provision() {
     ok = wm.autoConnect("Cuddle-Gateway-Setup");
   }
   if (!ok) {
+    // Backstop for a portal that timed out without a Save: keep anything valid the user
+    // typed so the retry after reboot starts from their values, not the old ones.
+    if (applyPortalFields(p_broker.getValue(), p_port.getValue(), p_gwid.getValue())) saveConfig();
     Serial.println("provisioning timed out, not connected — restarting");
     delay(1000);
     ESP.restart();
   }
 
-  // Persist any values entered in the portal (unchanged fields keep their defaults).
-  g_broker = p_broker.getValue();
-  g_port   = atoi(p_port.getValue());
-  g_gwid   = p_gwid.getValue();
-  saveConfig();
+  // Backstop for the success path (older WiFiManager builds without a params callback).
+  // Already-persisted values compare equal here, so this is a no-op on the common path.
+  if (applyPortalFields(p_broker.getValue(), p_port.getValue(), p_gwid.getValue())) saveConfig();
   WiFi.setAutoReconnect(true);
   Serial.printf("Wi-Fi ok %s | broker %s:%d | gateway %s\n",
                 WiFi.localIP().toString().c_str(), g_broker.c_str(), g_port, g_gwid.c_str());

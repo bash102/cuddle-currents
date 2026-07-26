@@ -28,7 +28,7 @@ arduino-cli core update-index
 arduino-cli core install esp32:esp32
 arduino-cli lib install "NimBLE-Arduino@1.4.3"   # pinned: firmware uses the 1.4 API
 arduino-cli lib install "PubSubClient"
-arduino-cli lib install "WiFiManager"            # captive-portal provisioning
+arduino-cli lib install "WiFiManager@2.0.17"     # pinned: needs the 2.x setSaveParamsCallback
 ```
 
 ## Configure
@@ -50,7 +50,19 @@ button (GPIO0) while pressing reset** — it raises a captive portal:
 1. On your phone, join the open Wi-Fi **`Cuddle-Gateway-Setup`**.
 2. The config page opens automatically (or visit `http://192.168.4.1`).
 3. Pick your Wi-Fi network + password, and set the **MQTT broker / port / gateway id**.
-4. Save — the gateway stores it to NVS and reconnects. Settings persist across reboots.
+4. Save — the gateway writes broker / port / gateway id to NVS **the moment you hit Save**,
+   before it tries to join Wi-Fi, then reconnects. Settings persist across reboots.
+
+Saving up front matters because the Wi-Fi join is the step most likely to fail (mistyped
+password, AP out of range) and a failed join reboots the board: persisting only after a
+successful join would throw away everything you just typed and make you enter it again on
+the next attempt. Now a bad Wi-Fi password costs you the password, not the whole form.
+
+A submitted field is only stored if it's usable — a blank broker, a port outside 1–65535,
+or a gateway id containing `/`, `+`, `#` (which would reshape the MQTT topic tree) is
+ignored and the previous stored value is kept, so a fat-fingered submit can't take the
+gateway off the air. Values are whitespace-trimmed, and an unchanged submit writes nothing.
+The rules live in `portal_fields.h` and are covered by `firmware/test/run.sh`.
 
 To change settings later, hold BOOT at reset to reopen the portal. (For bench testing
 without the button, compile with `-DFORCE_PORTAL` to always open the portal.)
