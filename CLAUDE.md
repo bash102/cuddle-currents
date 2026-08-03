@@ -70,6 +70,15 @@ sources/ → hub/ → processing/ → transport/ → frontend/
 - **Sessions are keyed by stable `person_id`, never by device address.** A band that drops
   and rejoins, or is swapped to another band, resumes the same session (history, RMSSD
   window, matrix position). Enrollment persists to `config/enrollment.yaml`.
+- **Beat times are reconstructed, not taken from `t_recv`.** `PersonSession._place_beats`
+  integrates the band's own RR forward from a running beat clock and uses the packet
+  arrival time only as a slow anchor (5% servo, hard re-anchor past 1.5 s). `t_recv` is
+  when the *packet* landed — connection-interval quantisation, host scheduling, and (over
+  a gateway) WiFi/MQTT queueing — while RR is measured on the band at ~1 ms before any of
+  that. Stamping every RR in a packet at `t_recv` also collapsed multi-RR notifications
+  onto one instant. On the two-sensor-one-arm capture (one heart, two bands) this is the
+  difference between PLV 0.41 and 0.96. Every hard re-anchor is counted in
+  `session.gap_count`/`gap_seconds` — those are beats the band measured and we never got.
 - **A device→person binding lives in three places that must stay in sync:**
   `profile.device_id`, `registry._device_to_person`, and the source's `_bindings`.
   `EnrollmentManager` is the only coordinator; reassign/park/retire must update all three or
