@@ -44,7 +44,7 @@ _DEFAULTS: dict[str, Any] = {
         "min_beats": 60,
         "stale_after": 1800.0,
         "reference": "rolling",  # fixed | rolling
-        "rolling_window": 1200.0,
+        "rolling_window": 1800.0,
         "rolling_quantile": 0.10,
         "rolling_min_span": 300.0,
     },

@@ -54,7 +54,12 @@ anything measured against it drifts as they settle — a person sitting calmly t
 can read as "+22% HRV" purely from an out-of-date reference. Two guards: the default sync
 mode (`zscore`) normalizes by the current window and so is immune, and the baseline-relative
 readouts (ΔHRV, the `baseline_delta` mode) use a **rolling rest reference** derived
-continuously from each person's own recent history (`baseline.reference: rolling`). Set it
+continuously from each person's own recent history — a low quantile of their HR over a
+trailing 30 min (`baseline.reference: rolling`). The window is a measured tradeoff: too
+short and the reference absorbs the very arousal you're trying to detect (at 2 min only
+2.2 of a 12 bpm event survived), while longer keeps improving stability but bounds how
+fast it can follow a step change — and the beat ring only holds ~30 min of history above
+~136 bpm, so an over-long window is silently truncated (the app logs a warning). Set it
 to `fixed` to go back to the enrollment snapshot — the Ops card then shows the baseline's
 age and flags it once past `baseline.stale_after`.
 

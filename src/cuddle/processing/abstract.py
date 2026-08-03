@@ -7,12 +7,16 @@ frame builder and the synchrony stage can reuse them.
 
 from __future__ import annotations
 
+import logging
+
 import numpy as np
 
 from cuddle.hub.registry import PersonSession
 from cuddle.processing.artifact import correct_rr
 from cuddle.processing.baseline import rmssd
 from cuddle.processing.resample import ema, resample, uniform_grid
+
+logger = logging.getLogger(__name__)
 
 # Extra look-back so the Hampel window has context at the window's left edge.
 _ART_PREROLL = 5.0
@@ -136,6 +140,35 @@ def rmssd_delta_from(cur: float | None, calibration, ref: float | None = None) -
 _REF_REFRESH = 5.0  # seconds between recomputes
 
 
+def _warn_if_window_exceeds_ring(session: PersonSession, now: float, window: float) -> None:
+    """Warn once per person if the ring can't actually hold ``rolling_window``.
+
+    The beat ring is bounded (capacity * mean RR of history), so a window longer than
+    that is silently truncated — the reference would quietly be computed over less data
+    than configured, with no other symptom. Capacity 4096 spans ~30 min only up to
+    ~136 bpm and ~60 min only up to ~68 bpm, so a long window plus an elevated HR is
+    exactly where this bites. Raise the ring capacity or lower the window.
+    """
+    ring = session.rr
+    if not ring.is_full:
+        return  # still filling: the limit is history, not capacity
+    t_all, _ = ring.arrays()
+    if t_all.size == 0:
+        return
+    span = now - float(t_all[0])
+    if span >= window:
+        return  # the ring still covers the whole window
+    if session.scratch.get("ring_window_warned"):
+        return
+    session.scratch["ring_window_warned"] = True
+    logger.warning(
+        "%s: rolling_window=%.0fs exceeds the beat ring (holds %d beats = %.0fs of "
+        "history here); the rest reference is using %.0fs. Lower "
+        "baseline.rolling_window or raise the PersonSession ring capacity.",
+        session.person_id, window, ring.capacity, span, span,
+    )
+
+
 def rolling_reference(
     session: PersonSession, now: float, cfg: dict, art: dict | None = None
 ) -> tuple[float | None, float | None]:
@@ -155,6 +188,8 @@ def rolling_reference(
 
     t, rr = corrected_beats(session, now - window, now, art) if art is not None \
         else session.rr.window(now - window, now)
+
+    _warn_if_window_exceeds_ring(session, now, window)
 
     hr_ref: float | None = None
     rmssd_ref: float | None = None

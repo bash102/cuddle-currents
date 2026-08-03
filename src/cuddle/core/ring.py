@@ -35,6 +35,17 @@ class TimeSeries:
             self._n += 1
 
     @property
+    def capacity(self) -> int:
+        """Max entries retained. Once full, the oldest are overwritten — so the span
+        of history actually available is capacity * mean interval, not unbounded."""
+        return self._cap
+
+    @property
+    def is_full(self) -> bool:
+        """True once the ring has wrapped, i.e. older data has been discarded."""
+        return self._n >= self._cap
+
+    @property
     def _size(self) -> int:
         return min(self._n, self._cap)
 

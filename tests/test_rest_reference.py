@@ -128,6 +128,53 @@ def test_frame_flags_a_stale_fixed_baseline(age, expect_stale):
     assert frame_mod is not None  # frame builds these same values; see test_frame_*
 
 
+def test_warns_when_the_ring_cannot_hold_the_window(caplog):
+    # A small ring that has wrapped can't cover the configured window, so the reference
+    # is quietly computed over less data than asked for — that must be reported.
+    from cuddle.hub.registry import PersonSession
+
+    sess = PersonSession(
+        PersonProfile(person_id="p", display_name="P",
+                      enrollment_state=EnrollmentState.active),
+        capacity=64,
+    )
+    t = NOW - 600.0
+    while t < NOW:  # ~600 beats into a 64-slot ring -> wrapped, holds only ~64s
+        t += 1.0
+        sess.rr.push(t, 1.0)
+        sess.inst_hr.push(t, 60.0)
+    sess.last_seen = t
+
+    with caplog.at_level("WARNING"):
+        abstract.rolling_reference(sess, NOW, _cfg(rolling_window=1800.0), None)
+    assert "exceeds the beat ring" in caplog.text
+    assert "p:" in caplog.text
+
+    # ...and only once per person, not every frame.
+    caplog.clear()
+    sess.scratch.pop("rolling_ref", None)  # force a recompute
+    with caplog.at_level("WARNING"):
+        abstract.rolling_reference(sess, NOW + 10.0, _cfg(rolling_window=1800.0), None)
+    assert "exceeds the beat ring" not in caplog.text
+
+
+def test_no_warning_when_the_ring_covers_the_window(caplog):
+    s = _session(hr_bpm=62.0, span=900.0)  # default 4096-slot ring, plenty of room
+    with caplog.at_level("WARNING"):
+        abstract.rolling_reference(s, NOW, _cfg(rolling_window=1800.0), None)
+    assert "exceeds the beat ring" not in caplog.text
+
+
+def test_default_window_fits_the_ring_at_plausible_heart_rates():
+    # The 30 min default must actually be available. capacity * (60/HR) >= window.
+    cfg = load_config()
+    window = cfg["baseline"]["rolling_window"]
+    capacity = 4096  # PersonSession default
+    max_hr = capacity * 60.0 / window
+    assert window == 1800.0
+    assert max_hr > 120.0  # holds for any plausible resting/active HR in a puddle
+
+
 def test_rolling_reference_never_goes_stale():
     # With enough history the rolling reference is in use, so an ancient enrollment
     # snapshot is irrelevant and must NOT be reported as stale.

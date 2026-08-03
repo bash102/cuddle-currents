@@ -47,7 +47,15 @@ baseline:
   #   rolling — a trailing self-updating estimate from the person's own recent data,
   #             which needs no operator action and can't go stale
   reference: rolling
-  rolling_window: 1200.0      # trailing history the rolling reference looks at, s
+  # 30 min. Measured tradeoff (90 min sim: settling drift + a genuine 3-min arousal
+  # event): a SHORT window lets the reference absorb the very thing you're measuring —
+  # at 2 min only 2.2 of a 12 bpm event survived — while reference stability keeps
+  # improving with length (mean drift error 2.16 bpm at 2 min -> 0.65 at 40 min).
+  # Ceiling: the beat ring holds 4096 beats, so 30 min of history exists only up to
+  # ~136 bpm (60 min only up to ~68 bpm). 30 min is comfortably inside that at any
+  # plausible resting HR; going longer trades responsiveness to a step change in
+  # resting level and risks silent truncation (which now logs a warning).
+  rolling_window: 1800.0      # trailing history the rolling reference looks at, s
   rolling_quantile: 0.10      # low quantile of HR = "my quiet level" (robust to spikes)
   rolling_min_span: 300.0     # need this much history before rolling engages;
                               #   until then the fixed baseline is used
