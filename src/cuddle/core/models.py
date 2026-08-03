@@ -114,7 +114,13 @@ class PersonState(BaseModel):
     hr: float | None = None  # smoothed instantaneous HR
     hr_var: float | None = None  # SD of smoothed HR over the sync window (bpm)
     rmssd: float | None = None  # rolling HRV
-    rmssd_delta: float | None = None  # relative to personal baseline, if calibrated
+    rmssd_delta: float | None = None  # vs the person's rest reference, if available
+    # Age of the enrollment baseline (s) and whether it has passed baseline.stale_after.
+    # The snapshot never updates, so a stale one silently biases anything measured
+    # against it — surfaced so the Ops view can say so instead of showing a wrong number.
+    baseline_age: float | None = None
+    baseline_stale: bool = False
+    rest_ref: str = "none"  # which rest reference the deltas used: fixed | rolling | none
     phase: float | None = None  # oscillator phase, radians 0..2pi
     last_seen: float | None = None  # host time of last sample
     uptime: float | None = None  # seconds connected in current link

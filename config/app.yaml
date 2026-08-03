@@ -36,6 +36,22 @@ baseline:
   min_quality: 0.6            # accept baseline only if mean quality >= this
   min_beats: 60               # need at least this many clean beats
 
+  # The enrollment capture is a SNAPSHOT: it's taken when someone has just walked in
+  # (often standing, still settling), and it never updates. Anything measured relative
+  # to it — the dHRV readout and the `baseline_delta` sync mode — drifts as the person
+  # settles over a long session, reading a change that is really reference staleness.
+  stale_after: 1800.0         # flag the baseline (and dHRV) as stale past this age, s
+
+  # reference: which "rest" the baseline-relative readouts compare against.
+  #   fixed   — the enrollment snapshot (original behaviour; drifts)
+  #   rolling — a trailing self-updating estimate from the person's own recent data,
+  #             which needs no operator action and can't go stale
+  reference: rolling
+  rolling_window: 1200.0      # trailing history the rolling reference looks at, s
+  rolling_quantile: 0.10      # low quantile of HR = "my quiet level" (robust to spikes)
+  rolling_min_span: 300.0     # need this much history before rolling engages;
+                              #   until then the fixed baseline is used
+
 transport:
   host: 127.0.0.1
   port: 8770                  # uncommon default to avoid collisions; override with --port

@@ -1,6 +1,7 @@
 """Synchrony metric sanity: known signals -> known concordance / PLV."""
 
 import numpy as np
+import pytest
 
 from cuddle.core.models import Calibration
 from cuddle.processing.synchrony import (
@@ -44,13 +45,22 @@ def test_ccc_offset_penalized_but_not_for_zscore():
 
 
 def test_zscore_transform_uses_window_stats_not_baseline():
-    # Even with a (misleading) baseline calibration, zscore standardizes by the
-    # window's own mean/std -> output is mean 0, std 1.
+    # Even with a (misleading) rest reference, zscore standardizes by the window's
+    # own mean/std -> output is mean 0, std 1, so it can't be skewed by a stale baseline.
     x = np.sin(np.linspace(0, 6 * np.pi, 200)) * 4 + 70
-    cal = Calibration(hr_mean=50.0, hr_std=1.0)  # deliberately wrong-for-window
-    z = _transform(x, "zscore", cal)
+    z = _transform(x, "zscore", 50.0)  # deliberately wrong-for-window rest level
     assert abs(float(z.mean())) < 1e-9
     assert abs(float(z.std()) - 1.0) < 1e-9
+
+
+def test_baseline_delta_uses_the_supplied_rest_reference():
+    # baseline_delta is the one mode anchored to "rest", so the reference it is handed
+    # (rolling or the enrollment snapshot) shifts the whole series.
+    x = np.full(50, 70.0)
+    assert float(np.nanmean(_transform(x, "baseline_delta", 70.0))) == pytest.approx(0.0)
+    assert float(np.nanmean(_transform(x, "baseline_delta", 78.0))) == pytest.approx(-8.0)
+    # No reference at all -> falls back to the window mean rather than crashing.
+    assert float(np.nanmean(_transform(x, "baseline_delta", None))) == pytest.approx(0.0)
 
 
 def test_zscore_ccc_equals_pearson():

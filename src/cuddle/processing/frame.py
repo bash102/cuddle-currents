@@ -52,6 +52,8 @@ def build_frame(
     # synchrony correlation (hr_grids, passed below); RMSSD feeds both the readout
     # and its delta. Avoids the old ~5 artifact/resample passes per person.
     hr_grids: dict[str, tuple] = {}
+    # person_id -> the resting-HR reference baseline_delta should use
+    rest_refs: dict[str, float | None] = {}
 
     people: list[PersonState] = []
     for session in store.all():
@@ -70,6 +72,30 @@ def build_frame(
         hr_grids[p.person_id] = (grid_s, smooth_s)
         rmssd_val = abstract.rolling_rmssd(session, now, proc["rmssd_window"], art)
 
+        # Which "rest" the deltas compare against, and how old the enrollment snapshot
+        # is. Resolved once here and reused by synchrony, so both readouts agree.
+        rest_hr, rest_rmssd = abstract.resolve_rest_refs(session, now, cfg, art)
+        rest_refs[p.person_id] = rest_hr
+        b_at = p.calibration.baseline_at
+        b_age = (now - b_at) if b_at is not None else None
+        using_rolling = (
+            cfg.get("baseline", {}).get("reference", "rolling") == "rolling"
+            and abstract.rolling_reference(session, now, cfg, art)[0] is not None
+        )
+        # A rolling reference tracks the person continuously, so it can't go stale —
+        # only a fixed snapshot can.
+        stale = bool(
+            not using_rolling
+            and b_age is not None
+            and b_age > cfg.get("baseline", {}).get("stale_after", 1800.0)
+        )
+        if using_rolling:
+            ref_kind = "rolling"
+        elif rest_hr is not None or rest_rmssd is not None:
+            ref_kind = "fixed"
+        else:
+            ref_kind = "none"
+
         people.append(
             PersonState(
                 person_id=p.person_id,
@@ -85,7 +111,12 @@ def build_frame(
                 hr=_round(abstract.current_hr(session, proc["hr_smooth_tau"], art)),
                 hr_var=_round(abstract.hr_std_from_grid(smooth_s)),
                 rmssd=_round(rmssd_val),
-                rmssd_delta=_round(abstract.rmssd_delta_from(rmssd_val, p.calibration)),
+                rmssd_delta=_round(
+                    abstract.rmssd_delta_from(rmssd_val, p.calibration, rest_rmssd)
+                ),
+                baseline_age=_round(b_age, 0),
+                baseline_stale=stale,
+                rest_ref=ref_kind,
                 phase=_round(abstract.phase_at(session, now)),
                 last_seen=session.last_seen,
                 uptime=session.uptime(now),
@@ -95,7 +126,7 @@ def build_frame(
             )
         )
 
-    sync = synchrony.compute(store.all(), now, cfg, hr_grids=hr_grids)
+    sync = synchrony.compute(store.all(), now, cfg, hr_grids=hr_grids, rest_refs=rest_refs)
     unassigned = source.unassigned_devices()
 
     gateways = orchestrator.gateway_states() if orchestrator else []

@@ -76,7 +76,7 @@ def ccc(x: np.ndarray, y: np.ndarray) -> float:
     return float(2.0 * cov / denom)
 
 
-def _transform(series: np.ndarray, mode: str, cal) -> np.ndarray:
+def _transform(series: np.ndarray, mode: str, rest: float | None) -> np.ndarray:
     finite = series[np.isfinite(series)]
     if finite.size == 0:
         return series
@@ -87,8 +87,8 @@ def _transform(series: np.ndarray, mode: str, cal) -> np.ndarray:
         # Deviation from each person's own resting HR (offset removed, natural bpm
         # scale kept) — "are our departures from our own rest co-moving". Uses the
         # baseline calibration; falls back to the window mean when uncalibrated.
-        rest = cal.resting_hr if cal and cal.resting_hr else float(np.nanmean(series))
-        return series - rest
+        ref = rest if rest else float(np.nanmean(series))
+        return series - ref
     # zscore (default): standardize by THIS window's own mean/std (not the resting
     # baseline). That makes each series mean-0 / var-1 in-window, so CCC reduces to
     # Pearson correlation — a pure, offset- and scale-invariant "shape" match.
@@ -174,7 +174,8 @@ def _plv_matrix(ph_series: list[np.ndarray]) -> np.ndarray:
     return plv
 
 
-def compute(sessions, now: float, cfg: dict, hr_grids: dict | None = None) -> dict:
+def compute(sessions, now: float, cfg: dict, hr_grids: dict | None = None,
+            rest_refs: dict | None = None) -> dict:
     """`hr_grids` optionally supplies each person's already-computed smoothed-HR
     grid over the sync window (`person_id -> (grid, smooth)`), so build_frame — which
     computes that same grid for the `hr_var` readout — isn't recomputed here. Must
@@ -206,7 +207,13 @@ def compute(sessions, now: float, cfg: dict, hr_grids: dict | None = None) -> di
         if not np.isfinite(hr).any():
             continue
         people.append(s)
-        hr_series.append(_transform(hr, mode, s.profile.calibration))
+        # baseline_delta needs a "rest" level. build_frame resolves it (rolling or the
+        # enrollment snapshot) and passes it in; fall back to the snapshot when called
+        # directly, e.g. from tests.
+        rest = (rest_refs or {}).get(s.person_id, None)
+        if rest is None:
+            rest = s.profile.calibration.resting_hr
+        hr_series.append(_transform(hr, mode, rest))
         ph_series.append(phase_grid(s, grid))
 
     n = len(people)

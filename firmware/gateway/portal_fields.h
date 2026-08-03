@@ -76,12 +76,38 @@ inline bool pf_valid_gwid(const char* trimmed) {
   return true;
 }
 
+// BLE transmit power, in dBm. Only the discrete ESP_PWR_LVL_* steps the radio actually
+// implements are accepted — a value in between would be silently rounded, so rejecting
+// it keeps what you typed and what the radio does the same thing.
+//
+// Lower is often BETTER with several co-located gateways: at close range the extra power
+// mostly desensitizes the neighbouring gateways' receivers rather than buying range.
+inline bool pf_parse_txpower(const char* trimmed, int* out) {
+  if (!trimmed || trimmed[0] == '\0') return false;
+  const char* digits = trimmed;
+  if (*digits == '-' || *digits == '+') digits++;
+  if (*digits == '\0') return false;
+  for (const char* q = digits; *q; ++q) {
+    if (!isdigit((unsigned char)*q)) return false;
+  }
+  const long v = strtol(trimmed, NULL, 10);
+  static const int kLevels[] = {-12, -9, -6, -3, 0, 3, 6, 9};
+  for (unsigned i = 0; i < sizeof(kLevels) / sizeof(kLevels[0]); ++i) {
+    if (v == kLevels[i]) {
+      if (out) *out = (int)v;
+      return true;
+    }
+  }
+  return false;
+}
+
 // The gateway's persisted settings, as plain storage so the whole decision below can
 // run (and be tested) without Arduino types.
 struct PfConfig {
   char broker[48];
   int  port;
   char gwid[32];
+  int  tx_power;  // dBm
 };
 
 // Fold one portal submit into `cfg`, field by field: a value is written only if it
@@ -89,7 +115,8 @@ struct PfConfig {
 // changed — the caller uses that to decide whether to touch NVS at all, so an
 // untouched submit (the portal pre-fills every field with the current value) writes
 // nothing, and an invalid field leaves the good stored value in place.
-inline bool pf_apply(PfConfig* cfg, const char* broker, const char* port, const char* gwid) {
+inline bool pf_apply(PfConfig* cfg, const char* broker, const char* port, const char* gwid,
+                     const char* txpower) {
   if (!cfg) return false;
   bool changed = false;
 
@@ -114,6 +141,14 @@ inline bool pf_apply(PfConfig* cfg, const char* broker, const char* port, const 
   pf_trim(gwid, id, sizeof(id));
   if (pf_valid_gwid(id) && strcmp(cfg->gwid, id) != 0) {
     memcpy(cfg->gwid, id, sizeof(id));
+    changed = true;
+  }
+
+  char txbuf[16];
+  int tx = 0;
+  pf_trim(txpower, txbuf, sizeof(txbuf));
+  if (pf_parse_txpower(txbuf, &tx) && tx != cfg->tx_power) {
+    cfg->tx_power = tx;
     changed = true;
   }
 

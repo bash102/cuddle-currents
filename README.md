@@ -49,6 +49,15 @@ We quantify it two ways:
 Because individual physiology differs (resting HR, HRV, respiration), each person is
 **baselined** at rest and their signal normalized before comparison.
 
+The enrollment baseline is a *snapshot*, taken as someone walks in and never updated, so
+anything measured against it drifts as they settle — a person sitting calmly two hours in
+can read as "+22% HRV" purely from an out-of-date reference. Two guards: the default sync
+mode (`zscore`) normalizes by the current window and so is immune, and the baseline-relative
+readouts (ΔHRV, the `baseline_delta` mode) use a **rolling rest reference** derived
+continuously from each person's own recent history (`baseline.reference: rolling`). Set it
+to `fixed` to go back to the enrollment snapshot — the Ops card then shows the baseline's
+age and flags it once past `baseline.stale_after`.
+
 One caveat the visualization respects: `zscore` concordance reads *dynamics*, so when a
 person's HR is essentially **flat** (windowed SD near the sensor noise floor — ~1 bpm at
 calm rest) it correlates noise and is unreliable. The Show puddle therefore **gates

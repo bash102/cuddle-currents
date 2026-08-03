@@ -111,13 +111,82 @@ def rmssd_delta(
     return rmssd_delta_from(rolling_rmssd(session, now, window, art), session.profile.calibration)
 
 
-def rmssd_delta_from(cur: float | None, calibration) -> float | None:
+def rmssd_delta_from(cur: float | None, calibration, ref: float | None = None) -> float | None:
     """RMSSD delta (%) from an already-computed RMSSD, split out so build_frame
-    computes RMSSD once (for the readout) and reuses it here, not twice."""
-    base = calibration.hrv_baseline
+    computes RMSSD once (for the readout) and reuses it here, not twice.
+
+    ``ref`` overrides the enrollment baseline with a rolling reference (see
+    ``rolling_reference``); without it this compares against the fixed snapshot.
+    """
+    base = ref if ref is not None else calibration.hrv_baseline
     if base is None or cur is None or base <= 0:
         return None
     return (cur - base) / base * 100.0
+
+
+# ---- rolling (self-updating) rest reference --------------------------------
+# The enrollment baseline is a snapshot taken as someone walks in and never updates, so
+# everything measured against it drifts as they settle. These derive the same reference
+# continuously from the person's OWN recent history instead:
+#   resting HR   = a low quantile of recent instantaneous HR ("my quiet level"), robust
+#                  to the occasional spike without needing a designated rest period
+#   resting RMSSD= RMSSD over that same long window, i.e. "my normal recent variability"
+# Recomputing a 20-minute window every frame for 30 people would be wasteful, so results
+# are cached per person and refreshed on an interval.
+_REF_REFRESH = 5.0  # seconds between recomputes
+
+
+def rolling_reference(
+    session: PersonSession, now: float, cfg: dict, art: dict | None = None
+) -> tuple[float | None, float | None]:
+    """Return (resting_hr, resting_rmssd) from recent history, or (None, None).
+
+    None means "not enough history yet" — callers fall back to the fixed baseline, so a
+    freshly-enrolled person behaves exactly as before until the window fills.
+    """
+    b = cfg.get("baseline", {})
+    window = b.get("rolling_window", 1200.0)
+    quantile = b.get("rolling_quantile", 0.10)
+    min_span = b.get("rolling_min_span", 300.0)
+
+    cached = session.scratch.get("rolling_ref")
+    if cached is not None and (now - cached[0]) < _REF_REFRESH:
+        return cached[1], cached[2]
+
+    t, rr = corrected_beats(session, now - window, now, art) if art is not None \
+        else session.rr.window(now - window, now)
+
+    hr_ref: float | None = None
+    rmssd_ref: float | None = None
+    # Require both a long enough span AND enough beats: a band that just reconnected can
+    # have an old first beat and a new last beat with almost nothing in between.
+    if rr.size >= 30 and t.size and (t[-1] - t[0]) >= min_span:
+        inst_hr = 60.0 / rr[rr > 0]
+        if inst_hr.size:
+            hr_ref = float(np.quantile(inst_hr, quantile))
+        rmssd_ref = rmssd(rr)
+
+    session.scratch["rolling_ref"] = (now, hr_ref, rmssd_ref)
+    return hr_ref, rmssd_ref
+
+
+def resolve_rest_refs(
+    session: PersonSession, now: float, cfg: dict, art: dict | None = None
+) -> tuple[float | None, float | None]:
+    """The (resting_hr, resting_rmssd) the readouts should actually compare against.
+
+    Honours ``baseline.reference``: ``fixed`` always uses the enrollment snapshot;
+    ``rolling`` prefers the self-updating estimate and falls back to the snapshot while
+    there isn't enough history.
+    """
+    cal = session.profile.calibration
+    if cfg.get("baseline", {}).get("reference", "rolling") != "rolling":
+        return cal.resting_hr, cal.hrv_baseline
+    hr_ref, rmssd_ref = rolling_reference(session, now, cfg, art)
+    return (
+        hr_ref if hr_ref is not None else cal.resting_hr,
+        rmssd_ref if rmssd_ref is not None else cal.hrv_baseline,
+    )
 
 
 def phase_at(session: PersonSession, now: float) -> float | None:

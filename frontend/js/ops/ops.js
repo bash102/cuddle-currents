@@ -210,6 +210,7 @@ function makePersonCard(p) {
       <div class="metric"><label>HR± var</label><span class="hrvar">—</span></div>
       <div class="metric"><label>RMSSD</label><span class="rmssd">—</span></div>
       <div class="metric"><label>ΔHRV</label><span class="hrvd">—</span></div>
+      <div class="metric"><label>rest ref</label><span class="restref">—</span></div>
       <div class="metric"><label>RRI</label><span class="rri">—</span></div>
     </div>
     <div class="qualwrap"><div class="qualbar"><div class="qualfill"></div></div><span class="qflags"></span></div>
@@ -229,6 +230,7 @@ function makePersonCard(p) {
     hrvar: root.querySelector(".hrvar"),
     rmssd: root.querySelector(".rmssd"),
     hrvd: root.querySelector(".hrvd"),
+    restref: root.querySelector(".restref"),
     rri: root.querySelector(".rri"),
     qualfill: root.querySelector(".qualfill"),
     qflags: root.querySelector(".qflags"),
@@ -305,6 +307,26 @@ function updatePersonCard(n, p) {
   }
   n.rmssd.textContent = p.rmssd != null ? `${p.rmssd.toFixed(0)} ms` : "—";
   n.hrvd.textContent = p.rmssd_delta != null ? `${p.rmssd_delta >= 0 ? "+" : ""}${p.rmssd_delta.toFixed(0)}%` : "—";
+  // ΔHRV is only meaningful relative to a rest reference. Say which one is in use, and
+  // grey out + warn when it's a fixed enrollment snapshot that has gone stale — that
+  // reads as a physiological change when it's really just an out-of-date baseline.
+  const ageMin = p.baseline_age != null ? p.baseline_age / 60 : null;
+  if (p.rest_ref === "rolling") {
+    n.restref.textContent = "rolling";
+    n.restref.style.color = "";
+    n.restref.title = "Self-updating from this person's own recent data — cannot go stale.";
+  } else if (p.rest_ref === "fixed") {
+    n.restref.textContent = ageMin != null ? `fixed ${ageMin.toFixed(0)}m` : "fixed";
+    n.restref.style.color = p.baseline_stale ? theme().warn : "";
+    n.restref.title = p.baseline_stale
+      ? "Enrollment baseline is stale — ΔHRV is measured against an out-of-date rest level. Re-baseline."
+      : "Enrollment baseline snapshot.";
+  } else {
+    n.restref.textContent = "none";
+    n.restref.style.color = "";
+    n.restref.title = "No rest reference yet — ΔHRV unavailable.";
+  }
+  n.hrvd.style.opacity = p.baseline_stale ? "0.45" : "1";
   // Latest RR interval (rr_tail is in seconds) shown in ms — the raw beat-to-beat time.
   const rr = p.rr_tail && p.rr_tail.length ? p.rr_tail[p.rr_tail.length - 1] : null;
   n.rri.textContent = rr != null ? `${(rr * 1000).toFixed(0)} ms` : "—";

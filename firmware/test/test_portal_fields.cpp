@@ -24,6 +24,7 @@ static PfConfig baseline() {
   snprintf(c.broker, sizeof(c.broker), "%s", "192.168.1.212");
   snprintf(c.gwid, sizeof(c.gwid), "%s", "esp32-01-a172e0");
   c.port = 1883;
+  c.tx_power = 3;
   return c;
 }
 
@@ -73,7 +74,7 @@ static void test_gwid_rules() {
 
 static void test_apply_persists_real_edits() {
   PfConfig c = baseline();
-  CHECK(pf_apply(&c, "10.0.0.5", "1884", "gw-lounge"), "reports a change");
+  CHECK(pf_apply(&c, "10.0.0.5", "1884", "gw-lounge", "3"), "reports a change");
   CHECK(strcmp(c.broker, "10.0.0.5") == 0, "broker updated");
   CHECK(c.port == 1884, "port updated");
   CHECK(strcmp(c.gwid, "gw-lounge") == 0, "gwid updated");
@@ -83,11 +84,11 @@ static void test_apply_is_noop_when_unchanged() {
   // The portal pre-fills every field with the current value, so an untouched submit
   // must not report a change (that is what keeps us from rewriting NVS every boot).
   PfConfig c = baseline();
-  CHECK(!pf_apply(&c, "192.168.1.212", "1883", "esp32-01-a172e0"), "no change reported");
+  CHECK(!pf_apply(&c, "192.168.1.212", "1883", "esp32-01-a172e0", "3"), "no change reported");
 
   // ...and the same values with phone-keyboard whitespace are still not a change.
   PfConfig c2 = baseline();
-  CHECK(!pf_apply(&c2, " 192.168.1.212 ", " 1883 ", " esp32-01-a172e0 "),
+  CHECK(!pf_apply(&c2, " 192.168.1.212 ", " 1883 ", " esp32-01-a172e0 ", " 3 "),
         "whitespace-only difference is not a change");
 }
 
@@ -95,13 +96,13 @@ static void test_apply_never_clobbers_with_bad_input() {
   // The core safety property: a bad or cleared field leaves the stored value alone,
   // so a fat-fingered submit can't take the gateway off the air.
   PfConfig c = baseline();
-  CHECK(!pf_apply(&c, "", "", ""), "all-empty submit changes nothing");
+  CHECK(!pf_apply(&c, "", "", "", ""), "all-empty submit changes nothing");
   CHECK(strcmp(c.broker, "192.168.1.212") == 0, "broker kept");
   CHECK(c.port == 1883, "port kept");
   CHECK(strcmp(c.gwid, "esp32-01-a172e0") == 0, "gwid kept");
 
   PfConfig c2 = baseline();
-  CHECK(!pf_apply(&c2, "   ", "abc", "bad/id"), "invalid submit changes nothing");
+  CHECK(!pf_apply(&c2, "   ", "abc", "bad/id", "abc"), "invalid submit changes nothing");
   CHECK(strcmp(c2.broker, "192.168.1.212") == 0, "broker kept vs whitespace");
   CHECK(c2.port == 1883, "port kept vs non-numeric");
   CHECK(strcmp(c2.gwid, "esp32-01-a172e0") == 0, "gwid kept vs topic-unsafe");
@@ -110,14 +111,46 @@ static void test_apply_never_clobbers_with_bad_input() {
 static void test_apply_partial_edit() {
   // One good field + two bad ones: the good one lands, the bad ones are ignored.
   PfConfig c = baseline();
-  CHECK(pf_apply(&c, "10.0.0.9", "70000", ""), "reports the one real change");
+  CHECK(pf_apply(&c, "10.0.0.9", "70000", "", "99"), "reports the one real change");
   CHECK(strcmp(c.broker, "10.0.0.9") == 0, "valid broker applied");
   CHECK(c.port == 1883, "out-of-range port ignored");
   CHECK(strcmp(c.gwid, "esp32-01-a172e0") == 0, "empty gwid ignored");
 }
 
+static void test_txpower_rules() {
+  int v = 0;
+  static const int kLevels[] = {-12, -9, -6, -3, 0, 3, 6, 9};
+  for (unsigned i = 0; i < sizeof(kLevels) / sizeof(kLevels[0]); ++i) {
+    const int lvl = kLevels[i];
+    char buf[8];
+    snprintf(buf, sizeof(buf), "%d", lvl);
+    CHECK(pf_parse_txpower(buf, &v) && v == lvl, "accepts a real radio step");
+  }
+  CHECK(pf_parse_txpower("+3", &v) && v == 3, "accepts a leading +");
+  // Between-steps values would be silently rounded by the radio, so reject them.
+  CHECK(!pf_parse_txpower("5", &v), "rejects a value the radio can't produce");
+  CHECK(!pf_parse_txpower("20", &v), "rejects out-of-range high");
+  CHECK(!pf_parse_txpower("-20", &v), "rejects out-of-range low");
+  CHECK(!pf_parse_txpower("", &v), "rejects blank");
+  CHECK(!pf_parse_txpower("abc", &v), "rejects non-numeric");
+  CHECK(!pf_parse_txpower("-", &v), "rejects a lone sign");
+}
+
+static void test_apply_txpower() {
+  PfConfig c = baseline();
+  CHECK(pf_apply(&c, "192.168.1.212", "1883", "esp32-01-a172e0", "-6"), "power edit reported");
+  CHECK(c.tx_power == -6, "power applied");
+
+  // A bad power value must not disturb a working radio setting.
+  PfConfig c2 = baseline();
+  CHECK(!pf_apply(&c2, "192.168.1.212", "1883", "esp32-01-a172e0", "5"), "bad power ignored");
+  CHECK(c2.tx_power == 3, "power kept");
+}
+
 int main() {
   printf("portal_fields host tests\n");
+  test_txpower_rules();
+  test_apply_txpower();
   test_trim();
   test_port_rules();
   test_gwid_rules();

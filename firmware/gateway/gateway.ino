@@ -37,6 +37,14 @@
 #define MAX_CONNECTIONS 3
 #endif
 
+// BLE transmit power in dBm. secrets.h is gitignored, so a copy predating this setting
+// won't define it — default here rather than break the build. 3 dBm is deliberately
+// modest: with several gateways in one room, extra power mostly desensitizes the
+// neighbours' receivers instead of buying range. Runtime-overridable from the portal.
+#ifndef BLE_TX_POWER
+#  define BLE_TX_POWER 3
+#endif
+
 #define BOOT_BUTTON 0  // GPIO0: hold at reset to force the config portal
 
 static const uint16_t HR_SERVICE = 0x180D;
@@ -50,6 +58,7 @@ Preferences prefs;
 String g_broker;
 int g_port;
 String g_gwid;
+int g_txpower;  // BLE TX power in dBm (portal/NVS; see BLE_TX_POWER in secrets.h)
 
 // ---- cross-task event marshalling ------------------------------------------
 enum EvtKind : uint8_t { EVT_HR = 0, EVT_CONNECTED = 1, EVT_DISCONNECTED = 2 };
@@ -171,6 +180,22 @@ static void connectTo(const char* addrStr, uint8_t type) {
   // connected + subscribed; onConnect already emitted the status event.
 }
 
+// NimBLE-Arduino 1.4 takes the ESP_PWR_LVL_* enum (esp-nimble-cpp 2.x, used by the IDF
+// build, takes plain dBm instead). Map the validated dBm value onto the enum here so both
+// builds expose the same portal field.
+static esp_power_level_t dbmToPowerLevel(int dbm) {
+  switch (dbm) {
+    case -12: return ESP_PWR_LVL_N12;
+    case  -9: return ESP_PWR_LVL_N9;
+    case  -6: return ESP_PWR_LVL_N6;
+    case  -3: return ESP_PWR_LVL_N3;
+    case   0: return ESP_PWR_LVL_N0;
+    case   3: return ESP_PWR_LVL_P3;
+    case   6: return ESP_PWR_LVL_P6;
+    default:  return ESP_PWR_LVL_P9;
+  }
+}
+
 // ---- config + provisioning -------------------------------------------------
 // A stable per-board hex suffix so a fleet flashed from ONE image is auto-unique.
 // The gateway id becomes the MQTT client id ("cuddle-gw-<gwid>"), and a broker evicts
@@ -187,6 +212,7 @@ static void loadConfig() {
   prefs.begin("gwcfg", false);
   g_broker = prefs.getString("broker", MQTT_BROKER);
   g_port   = prefs.getInt("port", MQTT_PORT);
+  g_txpower = prefs.getInt("txpower", BLE_TX_POWER);
   // Default id = GATEWAY_ID + per-chip suffix. A name set via the portal (stored in NVS
   // under "gwid") is used verbatim, so already-provisioned boards keep their id.
   g_gwid   = prefs.getString("gwid", String(GATEWAY_ID) + "-" + macSuffix());
@@ -196,6 +222,7 @@ static void saveConfig() {
   prefs.putString("broker", g_broker);
   prefs.putInt("port", g_port);
   prefs.putString("gwid", g_gwid);
+  prefs.putInt("txpower", g_txpower);
 }
 
 // Copy validated portal field values over the running config. Invalid fields (empty
@@ -203,17 +230,20 @@ static void saveConfig() {
 // never clobber a working config — see portal_fields.h for the rules.
 // Returns true if something actually changed, so NVS is only written on a real edit
 // (the portal's defaults are the current values, so an untouched submit is a no-op).
-static bool applyPortalFields(const char* broker, const char* port, const char* gwid) {
+static bool applyPortalFields(const char* broker, const char* port, const char* gwid,
+                              const char* txpower) {
   PfConfig cfg;
   snprintf(cfg.broker, sizeof(cfg.broker), "%s", g_broker.c_str());
   snprintf(cfg.gwid,   sizeof(cfg.gwid),   "%s", g_gwid.c_str());
-  cfg.port = g_port;
+  cfg.port     = g_port;
+  cfg.tx_power = g_txpower;
 
-  if (!pf_apply(&cfg, broker, port, gwid)) return false;
+  if (!pf_apply(&cfg, broker, port, gwid, txpower)) return false;
 
-  g_broker = cfg.broker;
-  g_port   = cfg.port;
-  g_gwid   = cfg.gwid;
+  g_broker  = cfg.broker;
+  g_port    = cfg.port;
+  g_gwid    = cfg.gwid;
+  g_txpower = cfg.tx_power;
   return true;
 }
 
@@ -233,9 +263,13 @@ static void provision() {
   WiFiManagerParameter p_broker("broker", "MQTT broker (host/IP)", g_broker.c_str(), 40);
   WiFiManagerParameter p_port("port", "MQTT port", portStr, 6);
   WiFiManagerParameter p_gwid("gwid", "Gateway ID", g_gwid.c_str(), 24);
+  char txStr[8];
+  snprintf(txStr, sizeof(txStr), "%d", g_txpower);
+  WiFiManagerParameter p_tx("txpower", "BLE TX power dBm (-12,-9,-6,-3,0,3,6,9)", txStr, 6);
   wm.addParameter(&p_broker);
   wm.addParameter(&p_port);
   wm.addParameter(&p_gwid);
+  wm.addParameter(&p_tx);
   wm.setConfigPortalTimeout(180);  // seconds to wait in the portal before giving up
 
   // Persist the instant the user hits Save in the portal — NOT after the Wi-Fi join.
@@ -244,7 +278,7 @@ static void provision() {
   // lost, so the user would have to retype broker/port/gateway-id on every attempt.
   // WiFiManager fires this callback while the portal is still up, before any of that.
   wm.setSaveParamsCallback([&]() {
-    if (applyPortalFields(p_broker.getValue(), p_port.getValue(), p_gwid.getValue())) {
+    if (applyPortalFields(p_broker.getValue(), p_port.getValue(), p_gwid.getValue(), p_tx.getValue())) {
       saveConfig();
       Serial.printf("portal: saved to NVS | broker %s:%d | gateway %s\n",
                     g_broker.c_str(), g_port, g_gwid.c_str());
@@ -262,7 +296,7 @@ static void provision() {
   if (!ok) {
     // Backstop for a portal that timed out without a Save: keep anything valid the user
     // typed so the retry after reboot starts from their values, not the old ones.
-    if (applyPortalFields(p_broker.getValue(), p_port.getValue(), p_gwid.getValue())) saveConfig();
+    if (applyPortalFields(p_broker.getValue(), p_port.getValue(), p_gwid.getValue(), p_tx.getValue())) saveConfig();
     Serial.println("provisioning timed out, not connected — restarting");
     delay(1000);
     ESP.restart();
@@ -270,7 +304,7 @@ static void provision() {
 
   // Backstop for the success path (older WiFiManager builds without a params callback).
   // Already-persisted values compare equal here, so this is a no-op on the common path.
-  if (applyPortalFields(p_broker.getValue(), p_port.getValue(), p_gwid.getValue())) saveConfig();
+  if (applyPortalFields(p_broker.getValue(), p_port.getValue(), p_gwid.getValue(), p_tx.getValue())) saveConfig();
   WiFi.setAutoReconnect(true);
   Serial.printf("Wi-Fi ok %s | broker %s:%d | gateway %s\n",
                 WiFi.localIP().toString().c_str(), g_broker.c_str(), g_port, g_gwid.c_str());
@@ -337,7 +371,7 @@ void setup() {
   ensureMqtt();
 
   NimBLEDevice::init(g_gwid.c_str());
-  NimBLEDevice::setPower(ESP_PWR_LVL_P9);
+  NimBLEDevice::setPower(dbmToPowerLevel(g_txpower));
   NimBLEScan* scan = NimBLEDevice::getScan();
   scan->setAdvertisedDeviceCallbacks(new ScanCB(), /*wantDuplicates=*/false);
   scan->setActiveScan(true);
