@@ -86,8 +86,11 @@ sources/ → hub/ → processing/ → transport/ → frontend/
   is an ordinary error-path re-anchor and *is* counted, and `_hr_holder` dedups the
   overlap so the cutover is clean rather than double-counted. It resets only on
   `_evict` (guarded by `dev not in _bindings`, so never for an enrolled person) or a
-  process restart. `PersonState.coverage` and the connection state machine are what
-  cover the uncounted cases.
+  process restart. Nor does it catch short losses: it takes `floor(HR/40) + 1`
+  consecutively-lost beats to trip the threshold, so a single lost beat is only counted
+  below 40 bpm. `PersonState.coverage` and the connection state machine are what cover
+  the uncounted cases — see the `gap_count` caveat in `docs/superpowers/roadmap.md` for
+  the measured table and why 1.5 s can't go lower.
 - **A device→person binding lives in three places that must stay in sync:**
   `profile.device_id`, `registry._device_to_person`, and the source's `_bindings`.
   `EnrollmentManager` is the only coordinator; reassign/park/retire must update all three or

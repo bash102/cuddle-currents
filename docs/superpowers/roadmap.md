@@ -182,14 +182,44 @@ Existing README roadmap item — durable session storage/history beyond flat cap
 - **Handoff churn**: without stickiness, a band on the edge of two gateways could flap
   between them. Addressed by the level B assignment algorithm.
 - **Uncounted beat loss (`gap_count` is a floor, not a total).** The beat clock counts a
-  dropout when integrated RR falls more than 1.5 s behind packet arrival. Two cases escape
-  it. (a) A `seq` reset discards the integrated phase before the error test runs, so those
-  losses aren't counted — this does *not* include gateway handoffs (`seq` is host-side per
-  device address, so a roam is an ordinary counted re-anchor), only a direct-BLE link drop
-  through `_evict` or a process restart. (b) A *sustained low-rate* loss never trips the
-  threshold: the 5% servo absorbs it as a slowly-accumulating offset instead, bounded at
-  roughly `20 × loss_rate × packet_interval` — on the real two-band capture, 1.2% loss
-  worked out to ~0.23 s of standing offset, which costs a little PLV and nothing else.
+  dropout when integrated RR falls more than `_BEAT_RESYNC_S` (1.5 s) behind packet
+  arrival. That is a threshold on accumulated *timing error*, not on interval length — it
+  places no ceiling on trackable HR — but it does set the detector's resolution, and three
+  things escape it.
+
+  **(a) Short losses, HR-dependent.** Measured, the number of consecutively-lost beats
+  needed to trip a re-anchor is exactly `floor(HR/40) + 1`:
+
+  | HR | 35 | 40 | 60 | 70 | 80 | 100 | 120 | 180 | 200 |
+  |---|---|---|---|---|---|---|---|---|---|
+  | beats to detect | 1 | 2 | 2 | 2 | 3 | 3 | 4 | 5 | 6 |
+  | = time lost | 1.71s | 3.00s | 2.00s | 1.71s | 2.25s | 1.80s | 2.00s | 1.67s | 1.80s |
+
+  So a *single* lost beat is only ever counted below 40 bpm. In time the floor is nearly
+  flat (always ~1.5–1.8 s of missing beats), which is the honest characterization: fixed
+  ~1.5 s resolution, and "how many beats" is just that divided by RR. **Why not lower it:**
+  running `|err|` on the clean two-band capture already peaks at 1.07–1.12 s from ordinary
+  beat/notification straddling, leaving only ~380–430 ms of headroom. At the bands' ~1 Hz
+  notification cadence 1.5 s is near the floor; it could come down only if the notification
+  rate went up.
+
+  **(b) Sustained low-rate loss** never trips the threshold at all: the 5% servo absorbs it
+  as a standing offset instead, bounded at roughly `20 × loss_rate × packet_interval` — on
+  the real capture, 1.2% loss worked out to ~0.23 s, which costs a little PLV and nothing
+  else.
+
+  **(c) A `seq` reset** discards the integrated phase before the error test runs. This does
+  *not* include gateway handoffs (`seq` is host-side per device address, so a roam is an
+  ordinary counted re-anchor) — only a direct-BLE link drop through `_evict`, or a process
+  restart.
+
+  Note (a)–(c) cover only *transport* loss — beats the band measured and we never received.
+  A band **mis-detecting** a beat is a different mode entirely: it reports one long RR, so
+  elapsed time stays fully accounted for and the beat clock correctly stays silent. That is
+  `artifact._repair_missed_extra`'s job, and it triggers on 1.75× the *local median*, so it
+  is HR-independent by construction (verified 45–190 bpm: beat recovered, no residual HR
+  excursion). Don't read a low `gap_count` as "the sensor is clean".
+
   `PersonState.coverage` and the connection state machine are the honest signals for how
   much of a window was really measured; treat `gap_count` as "at least this much was lost".
 
