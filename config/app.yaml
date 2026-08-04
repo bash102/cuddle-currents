@@ -3,6 +3,10 @@
 
 processing:
   resample_hz: 4.0            # uniform grid for cross-person correlation
+  resample_max_gap: 3.0       # seconds: never interpolate across a hole bigger than
+                              #   this (~3 beats). A straight line drawn over a
+                              #   dropout is invented data shaped exactly like signal;
+                              #   NaN instead, and the metrics exclude it. 0 disables.
   hr_smooth_tau: 3.0          # EMA time constant for smoothed instantaneous HR
   rmssd_window: 45.0          # rolling HRV window
   sync_window: 30.0           # sliding window for pairwise correlation / PLV
@@ -10,6 +14,13 @@ processing:
                               #   envelopes (bands stamp beats ~0.5s apart). Keep
                               #   small — a wide search inflates uncorrelated pairs.
                               #   0 disables.
+  sync_min_coverage: 0.5      # a pair must jointly have data for this fraction of the
+                              #   window before a number is reported. Gaps are no
+                              #   longer interpolated over, so a pair can share only a
+                              #   few seconds of the window — a correlation fitted to
+                              #   that (best-of a lag scan, no less) is noise dressed
+                              #   as a measurement. Below it the pair reads 0 and
+                              #   PersonState.coverage says why. 0 disables.
   sync_mode: zscore           # raw | zscore | baseline_delta
   stale_after_rr_factor: 2.5  # mark STALE if no beat within factor * expected RR
   sync_grace: 10.0            # keep a disconnected person in sync this long, then drop
@@ -29,7 +40,13 @@ artifact:                     # beat-level spike correction feeding HRV + synchr
   hampel_sigma: 3.0           # replace beats > sigma*MAD from local median...
   min_frac: 0.20              # ...AND > this fraction of median RR (Malik floor;
                               #    prevents over-correcting flat resting signals)
-  repair: true                # split ~2x (missed) / merge ~0.5x (extra) beats
+  repair: true                # split a long interval into round(rr/median) beats
+                              #   (missed) / merge ~0.5x (extra) beats
+  max_split: 3                # most beats one interval may be reconstructed into.
+                              #   Beyond this it is a dropout, not a mis-detection:
+                              #   the interval is dropped and the hole left for
+                              #   resample_max_gap to render as NaN. Inventing 22
+                              #   beats into a 20 s hole is not correction.
 
 baseline:
   duration: 120.0             # rest capture length (sim shortens this)

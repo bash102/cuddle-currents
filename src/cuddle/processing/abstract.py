@@ -35,6 +35,7 @@ def corrected_beats(
             hampel_sigma=art.get("hampel_sigma", 3.0),
             min_frac=art.get("min_frac", 0.20),
             repair=art.get("repair", True),
+            max_split=art.get("max_split", 3),
         )
     m = (t >= t_from) & (t <= t_to)
     return t[m], rr[m]
@@ -42,9 +43,13 @@ def corrected_beats(
 
 def smoothed_hr_grid(
     session: PersonSession, t_from: float, t_to: float, hz: float, tau: float,
-    art: dict | None = None,
+    art: dict | None = None, max_gap: float | None = None,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Instantaneous HR (artifact-corrected) resampled onto a uniform grid, EMA-smoothed."""
+    """Instantaneous HR (artifact-corrected) resampled onto a uniform grid, EMA-smoothed.
+
+    ``max_gap`` leaves dropouts as NaN rather than interpolating across them — see
+    ``resample.resample``.
+    """
     grid = uniform_grid(t_from, t_to, hz)
     if art is not None:
         t, rr = corrected_beats(session, t_from, t_to, art)
@@ -53,12 +58,15 @@ def smoothed_hr_grid(
         t, v = session.inst_hr.arrays()
     if grid.size == 0 or t.size == 0:
         return grid, np.full(grid.shape, np.nan)
-    series = resample(t, v, grid)
+    series = resample(t, v, grid, max_gap)
     smooth = ema(series, 1.0 / hz, tau)
     return grid, smooth
 
 
-def current_hr(session: PersonSession, tau: float, art: dict | None = None) -> float | None:
+def current_hr(
+    session: PersonSession, tau: float, art: dict | None = None,
+    max_gap: float | None = None,
+) -> float | None:
     """Latest smoothed instantaneous HR."""
     t, v = session.inst_hr.arrays()
     if t.size == 0:
@@ -66,7 +74,7 @@ def current_hr(session: PersonSession, tau: float, art: dict | None = None) -> f
     if t.size == 1:
         return float(v[-1])
     window = min(15.0, float(t[-1] - t[0]))
-    grid, smooth = smoothed_hr_grid(session, t[-1] - window, t[-1], 4.0, tau, art)
+    grid, smooth = smoothed_hr_grid(session, t[-1] - window, t[-1], 4.0, tau, art, max_gap)
     if smooth.size == 0 or np.isnan(smooth[-1]):
         return float(v[-1])
     return float(smooth[-1])
@@ -241,8 +249,16 @@ def phase_at(session: PersonSession, now: float) -> float | None:
     return float((2.0 * np.pi * frac) % (2.0 * np.pi))
 
 
-def phase_grid(session: PersonSession, grid: np.ndarray) -> np.ndarray:
-    """Phase series over a grid via beat interpolation; NaN where no beat bracket."""
+def phase_grid(
+    session: PersonSession, grid: np.ndarray, max_gap: float | None = None
+) -> np.ndarray:
+    """Phase series over a grid via beat interpolation; NaN where no beat bracket.
+
+    ``max_gap`` refuses to interpolate phase across a dropout. Without it a 25 s hole
+    between two real beats is read as one enormously slow beat, stretching a single
+    2*pi rotation over the whole gap — a phase trajectory the heart never had, which
+    PLV then scores against everyone else.
+    """
     t, _ = session.rr.arrays()
     if t.size < 2 or grid.size == 0:
         return np.full(grid.shape, np.nan)
@@ -254,5 +270,7 @@ def phase_grid(session: PersonSession, grid: np.ndarray) -> np.ndarray:
         t0, t1 = t[k - 1], t[k]
         if t1 <= t0:
             continue
+        if max_gap is not None and max_gap > 0 and (t1 - t0) > max_gap:
+            continue  # a dropout, not a beat interval
         out[i] = (2.0 * np.pi * (g - t0) / (t1 - t0)) % (2.0 * np.pi)
     return out

@@ -212,6 +212,7 @@ function makePersonCard(p) {
       <div class="metric"><label>ΔHRV</label><span class="hrvd">—</span></div>
       <div class="metric"><label>rest ref</label><span class="restref">—</span></div>
       <div class="metric"><label>RRI</label><span class="rri">—</span></div>
+      <div class="metric"><label>coverage</label><span class="cov">—</span></div>
     </div>
     <div class="qualwrap"><div class="qualbar"><div class="qualfill"></div></div><span class="qflags"></span></div>
     <div class="tracewrap"><canvas class="trace" width="400" height="64"></canvas></div>
@@ -232,6 +233,7 @@ function makePersonCard(p) {
     hrvd: root.querySelector(".hrvd"),
     restref: root.querySelector(".restref"),
     rri: root.querySelector(".rri"),
+    cov: root.querySelector(".cov"),
     qualfill: root.querySelector(".qualfill"),
     qflags: root.querySelector(".qflags"),
     trace: root.querySelector(".trace"),
@@ -330,6 +332,18 @@ function updatePersonCard(n, p) {
   // Latest RR interval (rr_tail is in seconds) shown in ms — the raw beat-to-beat time.
   const rr = p.rr_tail && p.rr_tail.length ? p.rr_tail[p.rr_tail.length - 1] : null;
   n.rri.textContent = rr != null ? `${(rr * 1000).toFixed(0)} ms` : "—";
+
+  // How much of the sync window is real measurement. Dropouts are no longer
+  // interpolated over, so someone can read "connected" and still contribute only part
+  // of a window — and below the pair coverage floor their synchrony reads 0, which
+  // would otherwise look identical to "measured, not in sync".
+  const cov = p.coverage;
+  n.cov.textContent = cov != null ? `${(cov * 100).toFixed(0)}%` : "—";
+  n.cov.style.color = cov != null && cov < 0.5 ? theme().warn : "";
+  const lost = p.gap_seconds ? ` ${p.gap_count} dropout(s), ${p.gap_seconds.toFixed(0)}s of beats lost` : "";
+  n.cov.title = (cov != null && cov < 0.5
+    ? "Too little of the sync window was measured — synchrony for this person reads 0 (no information), not 0 (not synced)."
+    : "Fraction of the sync window with real data (gaps are not interpolated over).") + lost;
 
   const q = p.quality ?? 0;
   const t = theme();

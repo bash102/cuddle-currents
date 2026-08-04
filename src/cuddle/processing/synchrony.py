@@ -97,10 +97,10 @@ def _transform(series: np.ndarray, mode: str, rest: float | None) -> np.ndarray:
     return (series - mu) / sd
 
 
-def _ccc_pairs(a: np.ndarray, b: np.ndarray) -> np.ndarray:
+def _ccc_pairs(a: np.ndarray, b: np.ndarray, min_pairs: int = 3) -> np.ndarray:
     """N×N Lin's CCC of a[i] vs b[j] over their both-finite samples, via masked
-    matmuls (population mean/var/cov, matching ``ccc``). NaN where <3 paired
-    finite samples; 0 where degenerate (denom <= 1e-12) — same guards as ``ccc``.
+    matmuls (population mean/var/cov, matching ``ccc``). NaN where fewer than
+    ``min_pairs`` paired finite samples; 0 where degenerate (denom <= 1e-12).
 
     Vectorizes the pairwise loop: with the NaNs zeroed and a 0/1 finite mask, the
     per-pair paired-finite count and sums of x, y, x², y², xy are all just
@@ -122,18 +122,26 @@ def _ccc_pairs(a: np.ndarray, b: np.ndarray) -> np.ndarray:
         denom = vx + vy + (mx - my) ** 2
         c = 2.0 * cov / denom
     c = np.where(denom <= 1e-12, 0.0, c)
-    return np.where(npair >= 3, c, np.nan)  # <3 paired samples -> excluded
+    return np.where(npair >= min_pairs, c, np.nan)  # too little overlap -> excluded
 
 
-def _ccc_matrix(series: list[np.ndarray], max_lag: int) -> np.ndarray:
+def _ccc_matrix(series: list[np.ndarray], max_lag: int, min_frac: float = 0.0) -> np.ndarray:
     """Vectorized equivalent of ``best_lag_ccc`` for every pair: the max Lin's CCC
     over integer lags in [-max_lag, max_lag] (each lag one batch of matmuls, ~17
-    total, vs. 435×17 tiny per-pair calls). Diagonal 1.0. Returns N×N."""
+    total, vs. 435×17 tiny per-pair calls). Diagonal 1.0. Returns N×N.
+
+    ``min_frac`` is the fraction of the window a pair must *jointly* have data for
+    before a number is reported. Dropouts are no longer interpolated over, so a pair
+    can now share only a few seconds of a 30 s window — and a correlation fitted to
+    that, especially one picked as the best of a ±2 s lag scan, is noise dressed as a
+    measurement. Below the floor the pair reads 0 (this module's existing "no
+    information" value); ``PersonState.coverage`` is what says why."""
     n = len(series)
     if n == 0:
         return np.zeros((0, 0))
     X = np.vstack(series).astype(float)
     T = X.shape[1]
+    min_pairs = max(3, int(round(min_frac * T)))
     lags = range(-max_lag, max_lag + 1) if max_lag > 0 else (0,)
     best = np.full((n, n), -np.inf)
     for lag in lags:
@@ -143,7 +151,7 @@ def _ccc_matrix(series: list[np.ndarray], max_lag: int) -> np.ndarray:
             a, b = X[:, : T + lag], X[:, -lag:]
         else:
             a, b = X, X
-        c = _ccc_pairs(a, b)
+        c = _ccc_pairs(a, b, min_pairs)
         best = np.maximum(best, np.where(np.isnan(c), -np.inf, c))
     out = np.where(np.isinf(best), 0.0, best)
     # Mirror upper->lower so [i][j] == [j][i] exactly (the loop set both from the
@@ -154,14 +162,15 @@ def _ccc_matrix(series: list[np.ndarray], max_lag: int) -> np.ndarray:
     return out
 
 
-def _plv_matrix(ph_series: list[np.ndarray]) -> np.ndarray:
+def _plv_matrix(ph_series: list[np.ndarray], min_frac: float = 0.0) -> np.ndarray:
     """Vectorized pairwise phase-locking value: |mean over both-finite samples of
     exp(i(phi_i - phi_j))|. One complex matmul (z @ conj(z).T) gives every pair's
-    sum at once. 0 where <3 paired samples; diagonal 1.0. Returns N×N."""
+    sum at once. 0 below the paired-sample floor (see ``_ccc_matrix``); diagonal 1.0."""
     n = len(ph_series)
     if n == 0:
         return np.zeros((0, 0))
     P = np.vstack(ph_series).astype(float)
+    min_pairs = max(3, int(round(min_frac * P.shape[1])))
     m = np.isfinite(P)
     z = np.where(m, np.exp(1j * np.where(m, P, 0.0)), 0.0)  # unit phasors, 0 at NaN
     mf = m.astype(float)
@@ -169,7 +178,7 @@ def _plv_matrix(ph_series: list[np.ndarray]) -> np.ndarray:
     s = z @ np.conj(z).T
     with np.errstate(invalid="ignore", divide="ignore"):
         plv = np.abs(s) / npair
-    plv = np.where(npair >= 3, plv, 0.0)
+    plv = np.where(npair >= min_pairs, plv, 0.0)
     np.fill_diagonal(plv, 1.0)
     return plv
 
@@ -188,6 +197,7 @@ def compute(sessions, now: float, cfg: dict, hr_grids: dict | None = None,
     grace = proc.get("sync_grace", 10.0)
     art = cfg.get("artifact")
     max_lag = int(round(proc.get("sync_max_lag", 0.0) * hz))  # samples; 0 disables
+    max_gap = proc.get("resample_max_gap")  # don't bridge dropouts; None disables
 
     grid = uniform_grid(now - window, now, hz)
 
@@ -203,7 +213,7 @@ def compute(sessions, now: float, cfg: dict, hr_grids: dict | None = None,
         if hr_grids is not None and s.person_id in hr_grids:
             _, hr = hr_grids[s.person_id]
         else:
-            _, hr = smoothed_hr_grid(s, now - window, now, hz, tau, art)
+            _, hr = smoothed_hr_grid(s, now - window, now, hz, tau, art, max_gap)
         if not np.isfinite(hr).any():
             continue
         people.append(s)
@@ -214,15 +224,16 @@ def compute(sessions, now: float, cfg: dict, hr_grids: dict | None = None,
         if rest is None:
             rest = s.profile.calibration.resting_hr
         hr_series.append(_transform(hr, mode, rest))
-        ph_series.append(phase_grid(s, grid))
+        ph_series.append(phase_grid(s, grid, max_gap))
 
     n = len(people)
     ids = [s.person_id for s in people]
 
     # Vectorized pairwise CCC (max over lags) + PLV — one batch of matmuls each,
     # equivalent to the old per-pair best_lag_ccc/PLV double loop (see helpers).
-    ccc_m = _ccc_matrix(hr_series, max_lag)
-    plv_m = _plv_matrix(ph_series)
+    min_frac = proc.get("sync_min_coverage", 0.0)
+    ccc_m = _ccc_matrix(hr_series, max_lag, min_frac)
+    plv_m = _plv_matrix(ph_series, min_frac)
     matrix = ccc_m.tolist()
     plv = plv_m.tolist()
 

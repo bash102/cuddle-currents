@@ -96,6 +96,17 @@ sources/ → hub/ → processing/ → transport/ → frontend/
 - **`artifact.correct_rr` runs before resampling/smoothing** and is deliberately surgical
   (Hampel + Malik floor + missed/extra-beat repair) so it removes spikes without flattening
   the real dynamics the coherence metric needs. Config under `artifact:` in `app.yaml`.
+  Repair runs *before* the plausibility gate — a genuine missed beat at a resting rate
+  exceeds `rr_max`, and gating first deleted exactly what repair exists to fix.
+- **Missing data is never filled in.** A long RR is split into `k = round(rr/median)`
+  beats only up to `artifact.max_split` (3); past that it is a dropout, so the interval
+  is dropped rather than subdivided. `resample`/`phase_grid` then refuse to interpolate
+  across a hole wider than `processing.resample_max_gap` (3 s) and emit NaN, and a pair
+  sharing less than `processing.sync_min_coverage` (0.5) of the window reads 0 — this
+  module's "no information" value — instead of a correlation fitted to a few seconds.
+  `PersonState.coverage` is what distinguishes that 0 from a measured 0; surface it
+  whenever you show a synchrony number. Measured on the real capture: a 25 s hole in the
+  30 s window used to turn a genuine +0.92 into a confident +0.07.
 
 ## Runtime state & the frontend build
 

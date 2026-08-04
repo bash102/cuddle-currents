@@ -67,7 +67,7 @@ def build_frame(
 
         grid_s, smooth_s = abstract.smoothed_hr_grid(
             session, now - proc["sync_window"], now, proc["resample_hz"],
-            proc["hr_smooth_tau"], art,
+            proc["hr_smooth_tau"], art, proc.get("resample_max_gap"),
         )
         hr_grids[p.person_id] = (grid_s, smooth_s)
         rmssd_val = abstract.rolling_rmssd(session, now, proc["rmssd_window"], art)
@@ -108,8 +108,14 @@ def build_frame(
                 enrollment=p.enrollment_state,
                 quality=round(quality, 3),
                 quality_flags=flags,
-                hr=_round(abstract.current_hr(session, proc["hr_smooth_tau"], art)),
+                hr=_round(abstract.current_hr(
+                    session, proc["hr_smooth_tau"], art, proc.get("resample_max_gap")
+                )),
                 hr_var=_round(abstract.hr_std_from_grid(smooth_s)),
+                coverage=round(float(np.mean(np.isfinite(smooth_s))), 3)
+                if smooth_s.size else 0.0,
+                gap_count=session.gap_count,
+                gap_seconds=round(session.gap_seconds, 1),
                 rmssd=_round(rmssd_val),
                 rmssd_delta=_round(
                     abstract.rmssd_delta_from(rmssd_val, p.calibration, rest_rmssd)

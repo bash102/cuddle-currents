@@ -121,6 +121,13 @@ class PersonState(BaseModel):
     baseline_age: float | None = None
     baseline_stale: bool = False
     rest_ref: str = "none"  # which rest reference the deltas used: fixed | rolling | none
+    # How much of the sync window is real measurement rather than a hole. Dropouts are
+    # no longer interpolated over, so a person can be connected and still contribute
+    # only part of a window; this says how much, so a low-confidence pair is legible
+    # instead of silently reading as "not in sync".
+    coverage: float = 0.0  # 0..1 fraction of the sync window with data
+    gap_count: int = 0  # dropouts detected on this link (beats measured, never received)
+    gap_seconds: float = 0.0  # cumulative seconds of beats lost to those dropouts
     phase: float | None = None  # oscillator phase, radians 0..2pi
     last_seen: float | None = None  # host time of last sample
     uptime: float | None = None  # seconds connected in current link

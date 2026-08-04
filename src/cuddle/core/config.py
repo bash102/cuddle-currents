@@ -14,10 +14,12 @@ import yaml
 _DEFAULTS: dict[str, Any] = {
     "processing": {
         "resample_hz": 4.0,
+        "resample_max_gap": 3.0,
         "hr_smooth_tau": 3.0,
         "rmssd_window": 45.0,
         "sync_window": 30.0,
         "sync_max_lag": 2.0,
+        "sync_min_coverage": 0.5,
         "sync_mode": "zscore",
         "stale_after_rr_factor": 2.5,
         "sync_grace": 10.0,
@@ -37,6 +39,7 @@ _DEFAULTS: dict[str, Any] = {
         "hampel_sigma": 3.0,
         "min_frac": 0.20,
         "repair": True,
+        "max_split": 3,
     },
     "baseline": {
         "duration": 120.0,
