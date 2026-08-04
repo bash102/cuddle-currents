@@ -79,6 +79,15 @@ sources/ → hub/ → processing/ → transport/ → frontend/
   onto one instant. On the two-sensor-one-arm capture (one heart, two bands) this is the
   difference between PLV 0.41 and 0.96. Every hard re-anchor is counted in
   `session.gap_count`/`gap_seconds` — those are beats the band measured and we never got.
+  What that counter does *not* cover: a `seq` reset drops the integrated phase (it can't
+  survive a dropped link) before the error test runs, so those losses go uncounted. `seq`
+  is generated host-side per **device address** (`mqtt_source._handle_hr`,
+  `ble_source`), so it does **not** reset when a band roams between gateways — a handoff
+  is an ordinary error-path re-anchor and *is* counted, and `_hr_holder` dedups the
+  overlap so the cutover is clean rather than double-counted. It resets only on
+  `_evict` (guarded by `dev not in _bindings`, so never for an enrolled person) or a
+  process restart. `PersonState.coverage` and the connection state machine are what
+  cover the uncounted cases.
 - **A device→person binding lives in three places that must stay in sync:**
   `profile.device_id`, `registry._device_to_person`, and the source's `_bindings`.
   `EnrollmentManager` is the only coordinator; reassign/park/retire must update all three or
