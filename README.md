@@ -46,6 +46,17 @@ We quantify it two ways:
   sits around 1/√N (~0.45 for 5), so judge synchrony by R rising above that baseline.
   It's complementary to cohesion — R measures beat *timing*, cohesion the HR *dynamics*.
 
+Because R and PLV are *pure beat timing*, they are only as good as the timestamps. A BLE
+notification tells you when the **packet** arrived, which includes connection-interval
+quantisation, host scheduling, and — over a gateway — WiFi/MQTT queueing; the RR interval
+inside it was measured on the band at ~1 ms before any of that. Beat times are therefore
+**reconstructed** by integrating the band's own RR forward from a running beat clock,
+using arrival time only as a slow anchor (a 5% servo tracks the band's crystal drift while
+low-passing transport jitter; an error past 1.5 s re-anchors outright, which is what a
+dropout looks like). The check is two bands on one arm — one heart, so the true answer is
+1: stamping each RR at its arrival time gave **PLV 0.41 / R 0.43**, and reconstruction
+gives **0.96 / 0.96**.
+
 Because individual physiology differs (resting HR, HRV, respiration), each person is
 **baselined** at rest and their signal normalized before comparison.
 
@@ -70,6 +81,22 @@ concordance on HR variability** — a correlation only counts when both hearts a
 vary — so calm, uninformative signals are not drawn as confidently synced. For flat
 traces, level agreement (`raw` mode, or simply the per-person HR readouts) is what to
 trust.
+
+A second caveat, and the reason the puddle sometimes says nothing rather than something:
+**missing data is never filled in.** Bands roam, gateways hand off, packets drop. A long
+gap between beats used to be smoothed over twice — once by splitting it into two
+implausibly slow beats, once by drawing a straight line across the hole when resampling —
+and a straight line is not absent data, it's *invented* data, in exactly the shape the
+correlation metric reads as signal. So: a long interval is reconstructed into
+`round(rr/median)` beats only up to 3, past which it's a dropout and the interval is
+dropped; the resampler refuses to interpolate across a hole wider than
+`processing.resample_max_gap` (3 s); and a pair that jointly covers less than
+`processing.sync_min_coverage` (half the window) reads **0 — meaning "no information",
+not "not synced"**. Every person carries a `coverage` readout (shown on their Ops card,
+amber under 50%) which is what distinguishes those two zeros, plus a count of beats lost
+to dropouts. Measured on a real capture: a 25 s hole in the 30 s window turned a genuine
+**+0.92** pair into a confident **+0.07** — the visualization asserting two people
+disagreed over a stretch where one of them simply wasn't there.
 
 ## Hardware
 
@@ -193,7 +220,8 @@ in parallel on different monitors:
   a brief cue announces their glyph + seat ("Wren · #1 — sapphire circle"). Press **L**
   to cycle on-dot labels (none → initials → seat number).
 - **`/ops` Ops** — the technical status: per-band connection lifecycle, raw HR/RR trace
-  + signal quality, the abstract per-person signal, and the synchrony heatmap. Cards
+  + signal quality, **coverage** (how much of the sync window is real measurement rather
+  than a dropout), the abstract per-person signal, and the synchrony heatmap. Cards
   sort **active sessions above disconnected ones**, and a person who (re)connects jumps
   to the top; each card has a **Remove** control (see band reuse above).
 
@@ -232,10 +260,18 @@ Key modules:
   reassign / remove); binding stays consistent across the registry and the source so a
   reassigned or removed band never keeps routing to its old owner.
 - `processing/baseline.py` — the rest-capture calibration that gates a person to active.
+- `hub/registry.py` — per-person sessions, and the beat clock that reconstructs beat
+  times from cumulative RR instead of packet arrival (see the metrics section above).
 - `processing/artifact.py` — beat-level spike correction (Hampel + Malik floor +
-  missed/extra-beat repair) feeding HRV/synchrony; surgical so it doesn't flatten the
-  real dynamics the coherence metric reads. Config under `artifact:` in `app.yaml`.
-- `processing/synchrony.py` — concordance + PLV + group cohesion.
+  bounded missed/extra-beat repair) feeding HRV/synchrony; surgical so it doesn't flatten
+  the real dynamics the coherence metric reads. Repair runs *before* the plausibility
+  gate — a genuine missed beat at a resting rate exceeds `rr_max`, so gating first
+  deleted exactly what repair exists to fix. Config under `artifact:` in `app.yaml`.
+- `processing/resample.py` — the uniform grid every cross-person comparison passes
+  through, including the `max_gap` rule that leaves dropouts as NaN rather than
+  interpolating over them.
+- `processing/synchrony.py` — concordance + PLV + group cohesion, with the joint-coverage
+  floor below which a pair reports nothing instead of a number fitted to a few seconds.
 - `frontend/js/show/puddle.js` — the force-directed puddle: concordance→distance
   mapping, flat-signal gate, and temporal smoothing (tunables at the top of `FORCE`).
 

@@ -181,6 +181,17 @@ Existing README roadmap item — durable session storage/history beyond flat cap
   the app. Fixed by level B (or more gateways / better coverage).
 - **Handoff churn**: without stickiness, a band on the edge of two gateways could flap
   between them. Addressed by the level B assignment algorithm.
+- **Uncounted beat loss (`gap_count` is a floor, not a total).** The beat clock counts a
+  dropout when integrated RR falls more than 1.5 s behind packet arrival. Two cases escape
+  it. (a) A `seq` reset discards the integrated phase before the error test runs, so those
+  losses aren't counted — this does *not* include gateway handoffs (`seq` is host-side per
+  device address, so a roam is an ordinary counted re-anchor), only a direct-BLE link drop
+  through `_evict` or a process restart. (b) A *sustained low-rate* loss never trips the
+  threshold: the 5% servo absorbs it as a slowly-accumulating offset instead, bounded at
+  roughly `20 × loss_rate × packet_interval` — on the real two-band capture, 1.2% loss
+  worked out to ~0.23 s of standing offset, which costs a little PLV and nothing else.
+  `PersonState.coverage` and the connection state machine are the honest signals for how
+  much of a window was really measured; treat `gap_count` as "at least this much was lost".
 
 ## Backlog — Ops UI & firmware polish
 
